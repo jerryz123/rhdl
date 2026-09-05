@@ -133,7 +133,8 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
   )
 
   def sign_value = riscv_sign_inject(format, left, right, control.sign_operation)
-  def integer_move_value = fp_move_to_integer(xlen, format, left)
+  def move_source = request.left[0..format.ieee_width].into(IEEEFloat(format))
+  def integer_move_value = fp_move_to_integer(xlen, format, move_source)
   def fp_move_value = integer_move_to_fp(xlen, format, request.integer_operand)
   def class_value = riscv_classify(format, left).zext(width)
   def fp_destination = request.control.registers.destination === RV5StageFloatDestination.FloatingPoint
@@ -234,7 +235,11 @@ circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
 
   def control :: RV5StageFloatExecutionControl() = request.control.execution
   def source_single = control.source_precision === RV5StageFloatPrecision.Single
-  def cross_precision = (control.unit === RV5StageFloatUnit.Convert) & (
+  def floating_point_destination = request.control.registers.destination === RV5StageFloatDestination.FloatingPoint
+  def ordinary_single = mux(floating_point_destination, control.destination_precision === RV5StageFloatPrecision.Single, source_single)
+  def cross_precision = floating_point_destination & request.control.registers.uses_frs1 & (
+    control.unit === RV5StageFloatUnit.Convert
+  ) & (
     control.source_precision =/= control.destination_precision
   )
   def single_source = riscv_unbox(FloatFormat.F32, 64, request.left)
@@ -248,7 +253,7 @@ circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
   double_to_single.rounding_mode <== request.rounding_mode
   double_to_single.tininess_mode <== TininessMode.AfterRounding
 
-  def ordinary = mux(source_single, single.completion, double.completion)
+  def ordinary = mux(ordinary_single, single.completion, double.completion)
   def converted_value = mux(
     source_single,
     riscv_nan_box(

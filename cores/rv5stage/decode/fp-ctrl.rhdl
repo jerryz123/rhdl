@@ -55,6 +55,18 @@ hardware_enum RV5StageFloatIntegerWidth:
   Word
   Long
 
+fun rv5stage_floating_point_profile_supported(xlen :: XLen, profile :: FloatingPointProfile):
+  (profile == FloatingPointProfile.None) || (
+    (xlen == XLen.X32) && (profile == FloatingPointProfile.F)
+  ) || (
+    (xlen == XLen.X64) && (profile == FloatingPointProfile.D)
+  )
+
+fun check_rv5stage_floating_point_profile(xlen :: XLen, profile :: FloatingPointProfile):
+  unless rv5stage_floating_point_profile_supported(xlen, profile)
+  | error(~who: #'check_rv5stage_floating_point_profile,
+          "RV5Stage supports only disabled FP, RV32F, or RV64D")
+
 bundle RV5StageFloatRegisterControl():
   uses_integer_rs1: Bool
   uses_frs1: Bool
@@ -519,6 +531,7 @@ def RV32FDFloatingPointDecode = ValidDecodeGen(RV32FDFloatingPointControlCases)
 def RV64FDFloatingPointDecode = ValidDecodeGen(RV64FDFloatingPointControlCases)
 
 circuit RV5StageFloatingPointInstructionDecoder(xlen :: XLen, profile :: FloatingPointProfile):
+  check_rv5stage_floating_point_profile(xlen, profile)
   input instruction: Bits(32)
   output valid: Bool
   output control: RV5StageFloatingPointControl()
@@ -529,14 +542,14 @@ circuit RV5StageFloatingPointInstructionDecoder(xlen :: XLen, profile :: Floatin
   def decoded :: DecodeResult(RV5StageFloatingPointControl()):
     cond
     | profile == FloatingPointProfile.None: disabled
-    | xlen == XLen.X32 && profile == FloatingPointProfile.F: RV32FFloatingPointDecode(instruction)
-    | xlen == XLen.X32: RV32FDFloatingPointDecode(instruction)
-    | profile == FloatingPointProfile.F: RV64FFloatingPointDecode(instruction)
+    | xlen == XLen.X32: RV32FFloatingPointDecode(instruction)
     | ~else: RV64FDFloatingPointDecode(instruction)
   valid <== decoded.valid
   control <== decoded.value
 
 export:
+  rv5stage_floating_point_profile_supported
+  check_rv5stage_floating_point_profile
   RV5StageFloatPrecision
   RV5StageFloatUnit
   RV5StageFloatDestination

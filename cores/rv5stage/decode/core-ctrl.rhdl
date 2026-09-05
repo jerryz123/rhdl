@@ -3,6 +3,8 @@
 
 import:
   "../../alu.rhdl" open
+  "../../branch-resolver.rhdl" open
+  "../../load-store.rhdl" open
   "decode-support.rhdl" open
   "alu-ctrl.rhdl" open
   "operand-ctrl.rhdl" open
@@ -13,8 +15,12 @@ import:
   "writeback-ctrl.rhdl" open
   "system-ctrl.rhdl" open
   "fence-ctrl.rhdl" open
+  "fp-ctrl.rhdl" open
   "../../../riscv/isa/rv32i.rhm" as rv32
   "../../../riscv/isa/rv64i.rhm" open
+  "../../../riscv/isa/f.rhm" as f
+  "../../../riscv/isa/d.rhm" as d
+  "../../../riscv/isa/fp-profile.rhm" open
   "../../../riscv/isa/xlen.rhm" open
   "../../../riscv/isa/m.rhm" open
   "../../../riscv/isa/a.rhm" open
@@ -23,6 +29,7 @@ import:
   "../../../riscv/isa/zicsr.rhm" open
   "../../../riscv/isa/zifencei.rhm" open
   "../../../riscv/isa/privileged.rhm" open
+  "../../../riscv/model/formats.rhm" open
   "../../../riscv/rtl/instruction-pattern.rhdl" open
   lib("rhodium/std/decode.rhdl") open
 
@@ -36,6 +43,8 @@ bundle RV5StageControl():
   writeback: WritebackControl()
   system: SystemControl()
   fence: FenceControl()
+  floating_point_valid: Bool
+  floating_point: RV5StageFloatingPointControl()
 
 // Ordinary host code adds independently authored control columns to one row
 // per instruction. The selected ISA still elaborates to one decode table.
@@ -64,6 +73,72 @@ fun compose_control_cases(instructions :: List.of(InstructionSpec),
           writeback: component_output(writeback_cases, input)
           system: component_output(system_cases, input)
           fence: component_output(fence_cases, input)
+          floating_point_valid: Bool(#false)
+          floating_point: pattern(RV5StageFloatingPointControl(), _)
+      )
+
+fun floating_point_core_control_cases(instructions :: List.of(InstructionSpec),
+                                      floating_point_cases :: List.of(DecodeCase)):
+  for List (instruction in instructions):
+    block:
+      def input = instruction_pattern(instruction)
+      def load = [f.FLW, d.FLD].contains(instruction)
+      def store = [f.FSW, d.FSD].contains(instruction)
+      def memory = load || store
+      def double = [d.FLD, d.FSD].contains(instruction)
+      def integer_sources = instruction.operands.filter(
+        ~keep: fun (operand): operand.role == "source" && operand.bank == RegisterBank.Integer
+      )
+      def immediate = cond
+      | load: ImmediateSelect.I
+      | store: ImmediateSelect.S
+      | ~else: ImmediateSelect.None
+      def memory_access = cond
+      | load: MemoryOperation.Load
+      | store: MemoryOperation.Store
+      | ~else: MemoryOperation.None
+      def memory_width = if double | MemoryWidth.Double | MemoryWidth.Word
+      def alu_control = partial_pattern(AluControl()):
+        result_select: AluResultSelect.Adder
+        subtract: Bool(#false)
+        unsigned_word: Bool(#false)
+        shift_add_amount: bits(0, 2)
+        word: Bool(#false)
+      def operand_control = pattern(OperandControl()):
+        uses_rs1: Bool(!integer_sources.is_empty())
+        uses_rs2: Bool(#false)
+        left: OperandASelect.Register
+        right: OperandBSelect.Immediate
+        immediate: immediate
+      def branch_control = partial_pattern(BranchControl()):
+        resolver:
+          partial_pattern(BranchResolverControl()):
+            enable: Bool(#false)
+      def memory_control = partial_pattern(MemoryControl()):
+        access: memory_access
+        width: memory_width
+        unsigned: Bool(#true)
+      def writeback_control = partial_pattern(WritebackControl()):
+        enable: Bool(#false)
+      def system_control = partial_pattern(SystemControl()):
+        csr: CsrOperation.None
+        action: SystemOperation.None
+      def fence_control = pattern(FenceControl()):
+        action: FenceOperation.None
+      DecodeCase(
+        input,
+        pattern(RV5StageControl()):
+          alu: alu_control
+          operand: operand_control
+          branch: branch_control
+          memory: memory_control
+          multiply: pattern(RV5StageMultiplyControl(), _)
+          divide: pattern(RV5StageDivideControl(), _)
+          writeback: writeback_control
+          system: system_control
+          fence: fence_control
+          floating_point_valid: Bool(#true)
+          floating_point: component_output(floating_point_cases, input)
       )
 
 def RV32IControlCases = compose_control_cases(
@@ -120,17 +195,34 @@ def RV64RV5StageControlCases = compose_control_cases(
   RV64RV5StageSystemCases,
   RV64RV5StageFenceCases
 )
+def RV32FCoreControlCases = RV32RV5StageControlCases ++ floating_point_core_control_cases(
+  RV32FFloatingPointInstructions,
+  RV32FFloatingPointControlCases
+)
+def RV64DCoreControlCases = RV64RV5StageControlCases ++ floating_point_core_control_cases(
+  RV64FDFloatingPointInstructions,
+  RV64FDFloatingPointControlCases
+)
 def RV32IControlDecode = ValidDecodeGen(RV32IControlCases)
 def RV64IControlDecode = ValidDecodeGen(RV64IControlCases)
 def RV32RV5StageControlDecode = ValidDecodeGen(RV32RV5StageControlCases)
 def RV64RV5StageControlDecode = ValidDecodeGen(RV64RV5StageControlCases)
+def RV32FCoreControlDecode = ValidDecodeGen(RV32FCoreControlCases)
+def RV64DCoreControlDecode = ValidDecodeGen(RV64DCoreControlCases)
 
-circuit RV5StageInstructionDecoder(xlen :: XLen):
+circuit RV5StageInstructionDecoder(xlen :: XLen,
+                                   profile :: FloatingPointProfile = DefaultFloatingPointProfile):
+  check_rv5stage_floating_point_profile(xlen, profile)
   input instruction: Bits(32)
   output valid: Bool
   output control: RV5StageControl()
 
-  def decoded :: DecodeResult(RV5StageControl()) = if xlen == XLen.X32 | RV32RV5StageControlDecode(instruction) | RV64RV5StageControlDecode(instruction)
+  def decoded :: DecodeResult(RV5StageControl()):
+    cond
+    | profile == FloatingPointProfile.None:
+        if xlen == XLen.X32 | RV32RV5StageControlDecode(instruction) | RV64RV5StageControlDecode(instruction)
+    | xlen == XLen.X32: RV32FCoreControlDecode(instruction)
+    | ~else: RV64DCoreControlDecode(instruction)
   valid <== decoded.valid
   control <== decoded.value
 
@@ -147,4 +239,8 @@ export:
   RV64RV5StageControlCases
   RV32RV5StageControlDecode
   RV64RV5StageControlDecode
+  RV32FCoreControlCases
+  RV64DCoreControlCases
+  RV32FCoreControlDecode
+  RV64DCoreControlDecode
   RV5StageInstructionDecoder

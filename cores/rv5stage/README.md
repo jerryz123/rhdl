@@ -75,17 +75,26 @@ of mechanically recreating flow transformations with helper instances.
 [`rv5stage.rhdl`](rv5stage.rhdl) instantiates this implementation in the
 integrated MMU and cache hierarchy.
 
-The standalone floating-point hierarchy is not yet instantiated by
-`RV5StageCore`. [`fp-register-file.rhdl`](fp-register-file.rhdl) defines a
+The optional floating-point hierarchy is instantiated as a parallel execution
+backend by `RV5StageCore`. RV5Stage supports RV32F and RV64D, with D including
+the RV64F instruction set; RV32D and RV64F-only core specializations are
+rejected. The default `None` specialization uses a disabled boundary and does
+not instantiate an FP register file or HardFloat datapath.
+[`fp-register-file.rhdl`](fp-register-file.rhdl) defines a
 32-entry, three-read, two-write bank whose 32- or 64-bit FLEN follows the
 selected F or D host profile. Unlike the integer bank, `f0` is an ordinary
 writable register, and the bank has no architectural reset value.
-[`decode/fp-ctrl.rhdl`](decode/fp-ctrl.rhdl) selects RV32F, RV64F, RV32FD, or
-RV64FD at elaboration and emits one sparse decode table of register-bank and
-direct execution-unit controls. The `None` profile emits no decode table.
+[`decode/fp-ctrl.rhdl`](decode/fp-ctrl.rhdl) supplies the RV32F and combined
+RV64F/RV64D controls. [`decode/core-ctrl.rhdl`](decode/core-ctrl.rhdl) merges
+the selected FP rows with the integer catalog at elaboration, so the integrated
+core still contains one instruction decode table.
 
 [`fp-pipeline.rhdl`](fp-pipeline.rhdl) is the core-specific parallel execution
-submodule for enabled profiles. It owns the FP register bank, FP RAW/WAW
+submodule for enabled profiles. The scalar pipeline remains the sole ordered
+instruction and retirement path. A legal compute instruction dispatches
+irrevocably from EX while its scalar token continues through MEM and WB, so an
+independent integer instruction can execute while FP work remains outstanding.
+The submodule owns the FP register bank, FP RAW/WAW
 scoreboarding, operand reads, two-cycle fixed execution path, buffered
 iterative divide/square-root paths, and completion arbitration. Its decoded
 ready-valid issue contract is non-speculative: every accepted request must
@@ -94,8 +103,10 @@ opaque caller context, integer or FP result metadata, and RISC-V exception
 flags. The submodule writes FP destinations internally only when its completion
 is accepted. Separate load-reservation/load-completion and store-data flows let
 the eventual central LSU retain address generation, translation, faults, and
-cache ordering. CSR state, architectural retirement, and integer scoreboarding
-remain outside this submodule. [`fp-bundles.rhdl`](fp-bundles.rhdl) owns these
+cache ordering. FP-to-integer results join the ordinary deferred GPR completion
+arbiter, while accepted FP state updates accrue flags and mark `mstatus.FS`
+dirty. CSR state, architectural retirement, and integer scoreboarding remain
+outside this submodule. [`fp-bundles.rhdl`](fp-bundles.rhdl) owns these
 boundary payloads; [`fp-datapath.rhdl`](fp-datapath.rhdl) and
 [`fp-div-sqrt.rhdl`](fp-div-sqrt.rhdl) own the internal execution lanes.
 
@@ -115,7 +126,7 @@ may finish internally but cannot return an instruction to Fetch.
 The core exposes `started` and `fetch_pc` directly. Redirect, initial start, and
 completed request update `fetch_pc` in that priority order, while paired valid
 equations make the L1I request and PC correlation queue advance together.
-Decode holds a token behind deferred loads, multiplies, or divides in ID/EX and EX/MEM
+Decode holds a token behind deferred loads, multiplies, divides, or FP results in ID/EX and EX/MEM
 until they reach WB.
 Execute owns forwarding, branch resolution, target and access alignment
 checks, and synchronous-exception classification. One readiness equation
@@ -151,12 +162,21 @@ Scoreboard WAW gating prevents both write ports from validly targeting the same
 register. Stores commit in WB; their address and alignment checks still occur
 before cache acceptance.
 
+FP loads and stores use the same address generator, MMU, PMA checks, ordered
+L1D, and uncached path as integer accesses. Memory responses carry an explicit
+none, integer, or floating-point destination together with the register index
+and FP precision, making writable `f0` distinct from no destination. An FP load
+reserves its FPR with the accepted legal memory request. An FP store holds EX
+for the FP register file's one-cycle store-data response before issuing the
+ordinary memory request. Since RV32 supports only F and RV64D has XLEN 64, the
+cache data path remains XLEN-wide.
+
 This is in-order commit with out-of-order register completion, not out-of-order
 instruction issue. D-cache responses remain ordered, and a blocking miss still
 prevents younger memory requests from entering the cache; only independent
 non-memory work passes the outstanding load.
 
-The integrated structured decoder selects the RV32IMAB+Zicond+Zicsr+Zifencei or RV64IMAB+Zicond+Zicsr+Zifencei catalog at host
+The integrated structured decoder selects the integer-only, RV32F, or RV64D catalog at host
 elaboration and emits the component control bundles directly, without an
 intermediate instruction-kind enum or parallel hardware decoders. Unused
 controls stay synthesis don't-cares while a separate valid bit determines
@@ -278,7 +298,8 @@ of being flattened into the same graph.
 ## Top-level core
 
 [`rv5stage.rhdl`](rv5stage.rhdl) defines
-`RV5Stage(xlen, ~icache: ..., ~dcache: ..., ~chi: ...)`. `xlen` is an
+`RV5Stage(xlen, ~floating_point: ..., ~icache: ..., ~dcache: ..., ~chi: ...)`.
+`xlen` is an
 `XLen` enum value. Architectural addresses and cache tags use
 `xlen.width` internally. Both private L1 caches use the architectural
 64-byte line size from [`cache.rhdl`](cache.rhdl), while each data SRAM row and

@@ -12,6 +12,7 @@ import:
   lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
   lib("cores/rv5stage/chi.rhdl") open
   lib("riscv/isa/xlen.rhm").XLen
+  lib("riscv/isa/fp-profile.rhm") open
   lib("riscv/rtl/pma.rhdl") open
   lib("devices/aclint.rhdl") open
   "host-interface.rhdl".SoCHostInterface
@@ -225,11 +226,13 @@ def simple_soc_dat_router_config :: SimpleRouterConfig = compile_simple_router(
   simple_soc_compilations.dat.network.router_plan(simple_soc_router)
 )
 
-sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params.fabric, ~home: home_module = CHIHNF(params.home_config)):
+sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params.fabric,
+                             ~floating_point: profile :: FloatingPointProfile = DefaultFloatingPointProfile,
+                             ~home: home_module = CHIHNF(params.home_config)):
   interface host(SoCHostInterface(simple_soc_flit), ~role: soc)
   interface memory(CHISNChannels(simple_soc_flit), ~role: icn)
 
-  inst rv5stage(RV5Stage(XLen.X64, ~chi: params.rv5stage_config))
+  inst rv5stage(RV5Stage(XLen.X64, ~floating_point: profile, ~chi: params.rv5stage_config))
   inst home(home_module)
   inst device_home(CHIHNI(params.device_home_params))
   inst aclint(Aclint(simple_soc_aclint_config))
@@ -313,13 +316,14 @@ sync_circuit SimpleSoCFabric(params :: SimpleSoCFabricParams = simple_soc_params
 
 // Exposes the fabric's line-capable subordinate channels while leaving storage
 // and response timing to the external SN-F implementation.
-sync_circuit SimpleSoC(params :: SimpleSoCParams = simple_soc_params):
+sync_circuit SimpleSoC(params :: SimpleSoCParams = simple_soc_params,
+                       ~floating_point: profile :: FloatingPointProfile = FloatingPointProfile.D):
   def fabric_params = params.fabric
   interface host(SoCHostInterface(fabric_params.flit), ~role: soc)
   interface memory(CHISNChannels(fabric_params.flit), ~role: icn)
 
   def HomeModule = CHIInclusiveHNF(params.llc_config)
-  inst fabric(SimpleSoCFabric(fabric_params, ~home: HomeModule))
+  inst fabric(SimpleSoCFabric(fabric_params, ~floating_point: profile, ~home: HomeModule))
 
   host <=> fabric.host
   fabric.memory <=> memory

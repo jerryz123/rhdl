@@ -40,6 +40,10 @@ switching configurations cannot reuse generated RTL for the other SoC. Set
 `BUILD_ROOT` when a different artifact root is required. Building a simulator
 does not require or embed a target program.
 
+The SimpleSoC harness uses that SoC's default RV64D specialization. The MiniSoC
+harness retains its fabric's integer-only default; TiledSoC also defaults to
+integer-only operation and can select an FP profile explicitly.
+
 The Makefile maps `SOC` to its harness module. A shared emitter dynamically
 loads only that module's exported `design`, so unrelated SoCs are not imported
 or elaborated. Every harness emits the same `SoCHarness` Verilog top contract,

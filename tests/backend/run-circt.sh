@@ -649,6 +649,8 @@ direct_fixture_specs=(
   'rv5stage-atomic|rv5stage_atomic_tb'
   'rv5stage-access-fault|rv5stage_access_fault_tb'
   'rv5stage-core|rv5stage_core_tb'
+  'rv5stage-core-rv32f|'
+  'rv5stage-core-rv64d|'
   'rv5stage-interrupt|rv5stage_interrupt_tb'
   'rv5stage-memory-router|rv5stage_memory_router_tb'
   'rv5stage-multiply|rv5stage_multiply_tb'

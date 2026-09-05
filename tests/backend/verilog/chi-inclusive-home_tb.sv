@@ -36,6 +36,7 @@ module chi_inclusive_home_tb;
 
   localparam logic [6:0] READ_NO_SNP = 7'h04;
   localparam logic [6:0] WRITE_NO_SNP_FULL = 7'h1d;
+  localparam logic [6:0] WRITE_UNIQUE_PTL = 7'h18;
   localparam logic [4:0] SNP_RESP = 5'h01;
   localparam logic [4:0] COMP = 5'h04;
   localparam logic [4:0] DBID_RESP = 5'h06;
@@ -274,6 +275,31 @@ module chi_inclusive_home_tb;
     subordinate_requests_ready_in = '0;
     subordinate_data_ready_in = '0;
     subordinate_data_in = '0;
+    tick();
+    reset = 1'b0;
+
+    requester_requests_in.bits = '0;
+    requester_requests_in.bits.src_id = DATA_ID;
+    requester_requests_in.bits.tgt_id = HOME_ID;
+    requester_requests_in.bits.opcode = WRITE_UNIQUE_PTL;
+    requester_requests_in.bits.address = LINE0;
+    requester_requests_in.bits.size_or_num_req = 6'd2;
+    requester_requests_in.bits.return_nid_or_stash_nid_or_data_target = DATA_ID;
+    requester_requests_in.valid = 1'b1;
+    #1;
+    assert (port_out.requester.requests.ready)
+      else $fatal(1, "inclusive Home did not accept a coherent partial write");
+    tick();
+    requester_requests_in = '0;
+    requester_responses_ready_in.ready = 1'b1;
+    #1;
+    assert (port_out.requester.responses.valid &&
+            port_out.requester.responses.bits.opcode == DBID_RESP &&
+            port_out.requester.responses.bits.tgt_id == DATA_ID)
+      else $fatal(1, "inclusive Home misclassified a coherent partial write");
+    tick();
+    requester_responses_ready_in = '0;
+    reset = 1'b1;
     tick();
     reset = 1'b0;
 
