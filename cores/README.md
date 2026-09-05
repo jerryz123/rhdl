@@ -2,135 +2,117 @@
 
 # Processor components and cores
 
-The top-level `cores/` package holds both reusable processor components and
-named processor implementations. It is distinct from
-[`rhodium/core/`](../rhodium/core/README.md), which owns the language's
+Use `cores/` for processor RTL, not for Rhodium's language internals. The
+similarly named [`rhodium/core/`](../rhodium/core/README.md) owns the
 frontend-independent hardware IR.
 
-Only components intended for reuse across processors belong directly under
-`cores/`. A named core owns its instruction-specific decode, pipeline,
-architectural state, and integrated tests in `cores/<name>/`.
+## Choose the right home
 
-## Package layout
+Before adding a component, decide who owns its policy:
 
-| Path | Owner |
-|---|---|
-| [`alu.rhdl`](alu.rhdl) | Width-parameterized RV32/RV64 integer, standard-B, and Zicond ALU |
-| [`branch-resolver.rhdl`](branch-resolver.rhdl) | Width-parameterized branch comparison and resolution |
-| [`load-store.rhdl`](load-store.rhdl) | XLEN scalar-access width, alignment, load extraction, and store lane generation |
-| [`multiplier.rhdl`](multiplier.rhdl) | Width-generic iterative signed and unsigned multiplication |
-| [`divider.rhdl`](divider.rhdl) | Width-generic iterative signed and unsigned division |
-| [`tests/alu-test.rhm`](tests/alu-test.rhm) | Direct tests for the reusable ALU |
-| [`tests/branch-resolver-test.rhm`](tests/branch-resolver-test.rhm) | Direct tests for the reusable branch resolver |
-| [`tests/load-store-test.rhm`](tests/load-store-test.rhm) | Direct structural tests for the reusable load/store generators |
-| [`tests/multiplier-test.rhm`](tests/multiplier-test.rhm) | Direct structural tests for the iterative multiplier |
-| [`tests/divider-test.rhm`](tests/divider-test.rhm) | Direct structural tests for the iterative divider |
-| [`rv5stage/`](rv5stage/README.md) | RV5Stage's RV32/RV64 IMAB+Zicond decode, five-stage pipeline, CSR/privilege state, caches, and tests |
+- Put an execution or data-shaping block directly under `cores/` only when its
+  interface is useful to more than one processor and it does not depend on an
+  instruction catalog, named core, backend, example, or test.
+- Put instruction decode, architectural state, pipeline policy, adapters, and
+  integrated tests under `cores/<name>/`.
+- Put direct tests for a reusable component in [`cores/tests/`](tests/). Put a
+  named core's tests under its own `tests/` directory.
 
-The dependency direction is one way:
+The boundary is enforced by [`check-boundaries.sh`](check-boundaries.sh). A
+reusable component may use the closed RISC-V `XLen` configuration when its
+contract is specifically RV32/RV64, but instruction catalogs and field models
+remain named-core policy.
 
-```text
-cores/rv5stage/ --> cores/{alu,branch-resolver,load-store,multiplier,divider}.rhdl
-       |-------> riscv/isa + riscv/rtl
-       `-------> rhodium/std
+## Pick a reusable component
 
-cores/{alu,load-store}.rhdl --> riscv/isa/xlen + #lang rhodium + rhodium/std
-cores/branch-resolver.rhdl --> #lang rhodium only
-cores/multiplier.rhdl --> #lang rhodium + rhodium/std
-cores/divider.rhdl --> #lang rhodium + rhodium/std
+All reusable blocks expose already-decoded physical controls. Their callers own
+instruction recognition, operand selection, pipeline scheduling, and
+architectural result selection.
+
+| Component | Interface and parameters | Timing contract | Component owns | Caller owns |
+|---|---|---|---|---|
+| [`ALU(xlen)`](alu.rhdl) | `XLen.X32` or `XLen.X64`; `left`, `right`, and `AluControl` to `result` | Combinational; no ready/valid state | Modular arithmetic, logic, shifts/rotates, comparisons, counts, unary transforms, RV64 word shaping, and the shared Zba/Zbb/Zbs/Zicond datapaths | Decode, operand routing, and result use |
+| [`BranchResolver(width)`](branch-resolver.rhdl) | `Valid(BranchResolverRequest)` to `Valid(BranchResult)` | Combinational; output validity follows input validity, with no backpressure | Equal and signed/unsigned less-than comparison plus final `taken` selection | Encodings, target generation, PC state, and redirect timing |
+| [`LoadGen(xlen, beat_bytes = 8)`](load-store.rhdl) | Address, returned beat, `MemoryWidth`, and signedness to one XLEN value | Combinational; the power-of-two beat must contain an XLEN word | Addressed scalar extraction and sign/zero extension | Beat-address alignment, access validation, protocol, and ordering |
+| [`StoreGen(xlen, beat_bytes = 8)`](load-store.rhdl) | Address, XLEN value, and `MemoryWidth` to beat data and `Mask(beat_bytes)` | Combinational; the power-of-two beat must contain an XLEN word | Addressed scalar placement and byte-lane mask generation | Beat-address alignment, access validation, protocol, and ordering |
+| [`IterativeMultiplier(width)`](multiplier.rhdl) | `Decoupled(MultiplierRequest)` to an `Irrevocable` double-width product | One request at a time; consumes one multiplier bit per cycle; response stays stable until accepted; may replace a response as it is consumed | Signed/unsigned magnitude handling and the complete product | Low/high/word projection and architectural destination |
+| [`IterativeDivider(width)`](divider.rhdl) | `Decoupled(DividerRequest)` to an `Irrevocable(DividerResponse)` | One request at a time; resolves one quotient bit per cycle; response stays stable until accepted; may replace a response as it is consumed | Quotient, remainder, divide-by-zero, and fixed-width signed-overflow behavior | Quotient/remainder/word projection and architectural destination |
+
+`MemoryWidth.is_aligned(address)` checks the same byte, halfword, word, or
+doubleword size contract used by the load/store generators. The generators do
+not suppress misaligned requests; invoke the helper or perform an equivalent
+check before issuing one.
+
+For both iterative engines, a request transfers only when `request.fire()` is
+true. The `Irrevocable` response may be backpressured and must be consumed with
+`response.fire()`. This interface deliberately leaves queueing, cancellation,
+destination tracking, and writeback policy outside the reusable block.
+
+## Add or inspect a named core
+
+Create `cores/<name>/` and keep its decode, datapath, architectural state,
+integration adapters, and tests together. A named core may depend on the
+reusable blocks, Rhodium libraries, pure RISC-V ISA/RTL support, and shared
+protocol libraries, but never on another named core.
+
+RV5Stage is the current named core. Its default profile is integer-only;
+supported optional profiles are RV32F on `XLen.X32` and RV64D on `XLen.X64`,
+with the D profile also implementing F. RV32D and an RV64F-only specialization
+are rejected. Compressed instructions are an independent optional
+specialization. See [`rv5stage/README.md`](rv5stage/README.md) for the owned
+instruction families, pipeline and completion contracts, FP state and
+execution, memory hierarchy, CHI boundary, generator parameters, ports, tests,
+and deliberate limits.
+
+## Preserve dependency direction
+
+```mermaid
+flowchart LR
+    consumers["Backends, examples, and tests"] --> named["Named cores<br/>cores/&lt;name&gt;/"]
+    consumers --> reusable["Reusable components<br/>cores/*.rhdl"]
+    named --> reusable
+    named --> riscv["RISC-V ISA and RTL"]
+    named --> protocols["Shared protocol libraries"]
+    named --> rhodium["Rhodium language and std"]
+    reusable --> rhodium
+    reusable -->|"ALU and load/store only"| xlen["RISC-V XLen"]
 ```
 
-Neither reusable components nor named cores may import the optional CIRCT
-backend, examples, or test implementations. Backend consumers elaborate their
-public designs from outside this package. Reusable components may consume the
-closed architectural `XLen` configuration but remain independent of RISC-V
-instruction catalogs, field models, decode adapters, and named cores.
+Production code must not reverse an arrow toward consumers. In particular,
+neither reusable components nor named cores may import the optional CIRCT
+backend, examples, or tests. Backend consumers elaborate public designs from
+outside this package.
 
-## Iterative multiplier
+## Verify a change
 
-[`multiplier.rhdl`](multiplier.rhdl) defines a one-request-at-a-time shift-add
-engine parameterized by operand width. Each request supplies two operands and
-a `MultiplierMode` that independently selects whether either operand is
-signed. The irrevocable response carries the complete double-width product and
-remains stable until accepted. Multiplication consumes one multiplier bit per
-cycle, and the unit can accept a replacement request in the cycle that a held
-response is consumed.
-
-The component does not select architectural high, low, or word results and
-does not import an instruction catalog. Those policies remain in a named
-core's decode and writeback logic.
-
-## Iterative divider
-
-[`divider.rhdl`](divider.rhdl) defines a one-request-at-a-time restoring
-divider parameterized by operand width. A request selects signed or unsigned
-interpretation, and the irrevocable response returns both quotient and
-remainder after one quotient bit is resolved per cycle. Division by zero
-returns an all-one quotient and the original dividend; fixed-width signed
-overflow returns the wrapped minimum quotient and zero remainder.
-
-The component does not select quotient versus remainder or define
-architecture-specific word operations. RV5Stage owns those projections in its
-adapter and decode logic.
-
-## Integer ALU
-
-[`alu.rhdl`](alu.rhdl) defines a stateless `ALU(xlen)` whose host parameter is
-`XLen.X32` or `XLen.X64`. Its `AluControl` input names physical resources and
-their orthogonal modifiers: result, logic, count, and unary selectors plus
-adder, shifter, comparison, bit-mask, and RV64 word controls. Its data inputs
-are already-selected `Bits(xlen.width)` operands. It owns modular arithmetic,
-bitwise operations, XLEN-sized shifts, signed and unsigned comparisons, and
-the standard Zba, Zbb, and Zbs operations plus Zicond conditional-zero operations.
-The 64-bit specialization additionally supports
-32-bit word behaviors with five-bit shifts and 32-to-64-bit sign extension;
-`word` is inert in the 32-bit specialization.
-
-Instruction decode drives those controls directly; the ALU contains no second
-instruction-operation decoder. ADD, SUB, comparisons, MIN/MAX, and Zba use
-one adder and comparison path. Base and negated logic plus Zbs single-bit
-operations and Zicond conditional masks use one prepared-right AND/OR/XOR path. SLL, SRL, SRA, SLLI.UW,
-BEXT, and part of each rotate use one shifter, while word/full and
-leading/trailing selection occurs before the count networks.
-The ALU deliberately knows nothing about instruction encodings, operand
-routing, memory, branches, or writeback.
-
-## Branch resolver
-
-[`branch-resolver.rhdl`](branch-resolver.rhdl) defines a stateless,
-width-parameterized `Valid` transform from `BranchResolverRequest` to
-`BranchResult`. Decode drives orthogonal `enable`, `unconditional`,
-`compare_equal`, `signed_mode`, and `invert` signals instead of an
-instruction-shaped condition enum. The resolver owns equality and signed or
-unsigned less-than comparison and carries request validity to its `taken`
-result. It knows nothing about instruction encodings, target selection, PCs,
-execute-stage acceptance, or redirects.
-
-## Load and store generators
-
-[`load-store.rhdl`](load-store.rhdl) owns the shared `MemoryWidth` control and
-two stateless XLEN-parameterized datapath components. Their optional
-`beat_bytes` parameter defaults to eight and must contain at least one XLEN
-word. `LoadGen` selects a byte, halfword, word, or doubleword from that returned
-beat and extends it to XLEN. `StoreGen` shifts an XLEN scalar source into its
-addressed byte lane and generates the corresponding `Mask(beat_bytes)`
-write-lane set.
-
-`MemoryWidth.is_aligned(address)` checks the same size contract independently. The
-generators deliberately know nothing about instruction encodings, memory
-protocols, request ordering, or pipeline stalls, so a core can reuse them with
-a cache, scratchpad, or another bus. The core remains responsible for aligning
-the beat address and for preventing a misaligned access from becoming a
-request.
-
-Run the reusable components' direct host tests from the repository root:
+Run commands from the repository root. For a reusable component, start with
+its direct host test:
 
 ```sh
-tools/run-racket-tests.sh cores/tests/*-test.rhm
+tools/run-racket-tests.sh cores/tests/alu-test.rhm
+tools/run-racket-tests.sh cores/tests/branch-resolver-test.rhm
+tools/run-racket-tests.sh cores/tests/load-store-test.rhm
+tools/run-racket-tests.sh cores/tests/multiplier-test.rhm
+tools/run-racket-tests.sh cores/tests/divider-test.rhm
 ```
 
-Run [`make rv5stage-host-test`](../Makefile) for all reusable components together
-with RV5Stage's decode and elaboration tests. `make rv5stage-test` additionally
-checks RV32/RV64 base and standard-B ALU behavior, load/store lane behavior,
-iterative multiplier transactions, and CSR privilege/trap transitions after
-CIRCT lowering with Verilator.
+Run only the line for the component you changed, or pass several paths to one
+invocation when a contract spans components. The script supplies a fresh
+`PLTCOMPILEDROOTS` when the caller has not already selected one.
+
+After changing imports, ownership, or package layout, run:
+
+```sh
+bash cores/check-boundaries.sh
+```
+
+For work that crosses reusable components and RV5Stage integration, the root
+[`Makefile`](../Makefile) provides:
+
+```sh
+make rv5stage-host-test
+```
+
+Use `make rv5stage-test` only when the change also needs the focused CIRCT and
+Verilator fixtures. The named core's owning README describes narrower RV5Stage
+test selections.

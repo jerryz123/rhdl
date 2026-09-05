@@ -2,140 +2,182 @@
 
 # CIRCT backend
 
-The backend is an explicit consumer of verified public core IR. It imports
-[`../core/`](../core/README.md), never frontend syntax or elaboration, and owns
-all CIRCT-specific opcode dispatch, type choices, SSA naming, and emission.
+The backend is the CIRCT-specific consumer of Rhodium's public hardware IR. The
+normal entry point accepts a completed `Design`, verifies it, and emits textual
+CIRCT MLIR. This directory owns CIRCT dialect selection, type representation,
+SSA names, and operation dispatch; it imports [`../core/`](../core/README.md)
+but no frontend syntax or elaboration modules.
 
-```text
-Rhodium hardware IR
-    |
-    v
-CIRCT hw/comb/seq/verif/sim MLIR
-    |
-    v
-CIRCT lowering passes and ExportVerilog
-    |
-    v
-SystemVerilog
+```mermaid
+flowchart LR
+    IR["Public Rhodium IR"] --> Verify["Core design verification"]
+    Verify --> Backend["CIRCT backend<br/>type and operation lowering"]
+    Backend --> MLIR["CIRCT MLIR<br/>hw, comb, seq, sv, verif, sim"]
+    MLIR --> Passes["External CIRCT passes<br/>and ExportVerilog"]
+    Passes --> SV["SystemVerilog"]
 ```
 
-Rhodium does not own a SystemVerilog emitter. CIRCT owns RTL generation.
+Rhodium stops at CIRCT MLIR; CIRCT's lowering passes and `ExportVerilog` own
+SystemVerilog generation.
 
-## Type lowering
+## Emission API
 
-- Every `FlatDataType` lowers to a signless integer of its physical width.
-- Anonymous `RecordType` lowers recursively to packed `hw.struct`, preserving
-  field names and order. Named record shapes lower through `hw.typedecl` and
-  `hw.typealias`.
-- `VectorType` lowers recursively to `hw.array`.
-- `Clock` and `Reset` lower to one-bit values in their control positions.
-- Modules and instances use `hw`; combinational expressions use `comb` or
-  `hw`; primitive registers use `seq`.
-- Active-high synchronous reset remains explicit as `seq.firreg` with
-  synchronous reset semantics.
+[`circt.rhm`](circt.rhm) exports two functions:
 
-Frontend-defined flat types need no backend special case. Equal lowered types
-make representation casts aliases; other equal-width representations use
-`hw.bitcast`. Bundle declarations preserve a preferred name as non-semantic
-record metadata. The backend emits reachable named shapes in one CIRCT type
-scope, and ExportVerilog renders them as packed SystemVerilog typedefs.
-Distinct concrete shapes that request the same preferred name receive stable
-numeric suffixes. Anonymous structural records remain inline structs.
+- `emit_circt(design)` is the whole-design API. It calls `verify_design`,
+  collects design-wide record aliases and DPI declarations, emits every
+  `hw.module`, and wraps the result in a builtin MLIR `module`.
+- `emit_module_circt(module_def)` emits one `hw.module`. It does not run design
+  verification or establish the design-wide record-alias scope, so callers
+  producing a complete design should use `emit_circt`.
 
-## Operation lowering
+An unsupported verified type or opcode is a backend error. The backend does not
+add pseudo-CIRCT operations to avoid an explicit lowering decision.
 
-| Rhodium | CIRCT |
+## Type representation
+
+| Rhodium type | CIRCT representation |
+|---|---|
+| `FlatDataType` | Signless integer with the type's physical width |
+| `Clock`, `Reset` | `i1` in clock and reset positions |
+| Anonymous `RecordType` | Recursive packed `hw.struct`, preserving field names and order |
+| Named record shape | `hw.typedecl` plus `hw.typealias` in `@rhodium_types` |
+| `VectorType` | Recursive `hw.array` |
+
+Frontend-defined flat types therefore need no backend-specific case. A
+representation cast whose lowered source and destination types are identical
+is an SSA alias; another equal-width packed cast becomes `hw.bitcast`.
+
+A record's preferred name is non-semantic metadata. The whole-design emitter
+collects concrete named shapes into one type scope, reuses an alias for an
+identical shape, and assigns stable numeric suffixes when distinct shapes ask
+for the same name. Anonymous records remain inline structs.
+
+## Lowering by concept
+
+### Structure and state
+
+| Rhodium IR | CIRCT lowering |
+|---|---|
+| `rtl.input_port`, `rtl.output_port`, `rtl.drive` | `hw.module` signature and `hw.output` |
+| `rtl.instance` | `hw.instance` |
+| `rtl.wire` | SSA alias to its verified driver |
+| `rtl.cast` | SSA alias or `hw.bitcast`, according to lowered type equality |
+| `rtl.register` | `seq.firreg` after `seq.to_clock` |
+| `rtl.register_reset` | `seq.firreg` with active-high synchronous reset |
+
+Inputs, outputs, drives, and wires need no standalone operation after their
+connections have been incorporated into the module signature, `hw.output`, or
+the consuming SSA reference.
+
+### Primitive dataflow
+
+| Rhodium IR | CIRCT lowering |
 |---|---|
 | `rtl.constant` | `hw.constant` |
-| `rtl.dont_care` | `sv.constantX` as a synthesis-freedom carrier |
-| `rtl.decode` | `sv.alwayscomb` containing a sparse `sv.case casez` relation |
+| `rtl.dont_care` | `sv.constantX` |
 | `rtl.not` | `comb.xor` with an all-ones constant |
-| `rtl.and/or/xor` | `comb.and/or/xor` |
-| `rtl.add/sub/mul` | `comb.add/sub/mul` |
-| `rtl.shl/shru/shrs` | `comb.shl/shru/shrs` with lossless operand-width normalization |
-| `rtl.eq/ult/slt` | `comb.icmp eq/ult/slt` |
-| `rtl.mux_lookup` | comparisons plus a `comb.mux` tree |
-| `rtl.onehot_mux` | selector-bit gating plus a balanced `comb.or` tree |
-| `rtl.cast` | alias or `hw.bitcast` |
+| `rtl.and`, `rtl.or`, `rtl.xor` | Matching `comb` operation |
+| `rtl.add`, `rtl.sub`, `rtl.mul` | Matching `comb` operation |
+| `rtl.shl`, `rtl.shru`, `rtl.shrs` | Matching `comb` shift after operand-width normalization |
+| `rtl.eq`, `rtl.ult`, `rtl.slt` | `comb.icmp` with `eq`, `ult`, or `slt` predicate |
 | `rtl.concat` | `comb.concat` |
-| `rtl.extract/trunc` | `comb.extract` |
-| `rtl.zext` | zero constant plus `comb.concat` |
-| `rtl.sext` | sign-bit extraction plus `comb.concat` |
-| `rtl.record_create/get` | `hw.struct_create/extract` |
-| `rtl.vector_create/get` | `hw.array_create/get` with a host-static index |
-| `rtl.vector_index/inject` | dynamic `hw.array_get/inject` |
-| `rtl.vector_write_set` | symmetric per-element decode and OR merge |
+| `rtl.extract`, `rtl.trunc` | `comb.extract` |
+| `rtl.zext`, `rtl.sext` | Zero/sign materialization plus `comb.concat` |
+
+CIRCT shifts require equal-width operands, while Rhodium permits an
+independently sized amount. A narrower amount is zero-extended to the value
+width. With a wider amount, the value is widened, shifted at the amount width,
+and truncated to its declared result width; signed right-shift values are
+sign-extended and other values are zero-extended. This retains Rhodium's
+fixed-width overflow and overshift behavior.
+
+`sv.constantX` is a synthesis-freedom carrier, not four-state Rhodium value
+semantics. Downstream RTL simulation can display or propagate X, but the public
+Rhodium operations continue to use the ordinary two-state hardware model.
+
+### Selection and relations
+
+| Rhodium IR | CIRCT lowering |
+|---|---|
+| `rtl.mux_lookup` | Key comparisons and a `comb.mux` tree; a one-bit key-1 case is one `comb.mux` |
+| `rtl.onehot_mux` | Selector-bit gating and a balanced `comb.or` tree |
+| `rtl.decode` | `sv.alwayscomb` containing one sparse `sv.case casez` |
+| `rtl.vector_write_set` | Symmetric per-element decode, gated data, balanced OR merge, and old-element fallback |
+
+A one-hot mux intentionally adds no validity detector: zero-hot and multi-hot
+selectors are outside its result contract. Choices are packed when necessary,
+gated by their selector bits, OR-reduced, and cast back to the result type.
+
+Vector write sets compare every enabled port with every destination element.
+The lowering OR-merges same-element data and keeps the old element when no port
+matches. It has neither priority nor collision detection; enabled writes to the
+same index are outside the operation's contract.
+
+Decode relations stay relational until this backend. Input-care masks become
+`z` wildcard positions in `casez`; partially specified outputs use
+`sv.constantX` for uncared bits. Core verification establishes non-overlapping
+rows, so source row order is irrelevant. CIRCT and downstream synthesis choose
+the resulting gate implementation; Rhodium runs no backend-side minimizer.
+
+### Aggregates
+
+| Rhodium IR | CIRCT lowering |
+|---|---|
+| `rtl.record_create`, `rtl.record_get` | `hw.struct_create`, `hw.struct_extract` |
+| `rtl.vector_create` | `hw.array_create`, reversing operands to preserve Rhodium element numbering |
+| `rtl.vector_get` | `hw.array_get` with a host-static index |
+| `rtl.vector_index`, `rtl.vector_inject` | Dynamic `hw.array_get`, `hw.array_inject` |
+
+### Storage
+
+| Rhodium resource | CIRCT lowering |
+|---|---|
 | `rtl.memory` | `seq.hlmem` |
-| `rtl.memory_read_async` | latency-zero `seq.read` |
-| `rtl.memory_write` | latency-one `seq.write` |
+| `rtl.memory_read_async` | Latency-zero `seq.read` |
+| `rtl.memory_write` | Latency-one `seq.write` |
 | `rtl.sync_memory` | `seq.firmem` with native read, write, or shared read-write ports |
-| `cdc.sync_level` | no operation; verified stage registers receive `sv.attributes` `async_reg = "TRUE"` |
-| `rtl.wire` | alias to the wire's driver |
-| `verif.assert` | guarded, reset-suppressed rising-edge `verif.clocked_assert` |
-| `sim.dpi_call` | result-less clocked `sim.func.dpi.call` |
-| `sim.dpi_register` | one- or multi-result clocked `sim.func.dpi.call` |
 
-Shift operands require equal widths in CIRCT. A narrower amount is
-zero-extended. For a wider amount, an unsigned value is zero-extended and a
-signed value is sign-extended before shifting and truncating back to its
-declared width. This preserves fixed-width overflow and overshift semantics.
+The older asynchronous-read `Memory` resource stays on `seq.hlmem`.
+Synchronous-memory elements are packed to the integer width required by
+`seq.firmem` and bitcast back at aggregate port boundaries. A declared mask
+granularity determines the FIR memory's mask width, and write and shared
+read-write ports pass that mask directly. The CIRCT generated-memory flow then
+preserves the declared port topology, enables, and packed-lane masks while
+producing its simulation SystemVerilog module.
 
-One-hot mux choices are packed when necessary, AND-gated by their corresponding
-selector bits, reduced through a balanced OR tree, and cast back to their result
-type. The operation deliberately adds no validity detector: zero-hot and
-multi-hot selectors are outside its result contract.
+### Verification, CDC evidence, and simulation effects
 
-Vector write sets decode every enabled port against every destination element.
-The lowering OR-merges matching data through balanced trees and retains the old
-element when no port matches. It emits neither a priority chain nor collision
-detection; same-index enabled writes are outside the operation's contract.
+| Rhodium IR | CIRCT lowering |
+|---|---|
+| `cdc.sync_level` | No emitted operation; verified stage registers receive `async_reg = "TRUE"` SV attributes |
+| `verif.assert` | Reset-suppressed, guard-enabled, rising-edge `verif.clocked_assert` |
+| `sim.dpi_call` | Enabled, clocked, result-less `sim.func.dpi.call` |
+| `sim.dpi_register` | Enabled, clocked, result-bearing `sim.func.dpi.call` |
 
-Rhodium does not introduce pseudo-CIRCT operations when CIRCT's canonical form is
-a composition. An unsupported verified type or operation produces a backend
-error rather than leaking CIRCT decisions into core schemas.
+`cdc.sync_level` is durable analysis evidence rather than hardware. Core
+verification proves that it identifies a resetless, direct, one-bit register
+chain on one destination clock. The backend omits the evidence operation and
+marks only those verified stage registers.
 
-`cdc.sync_level` is durable analysis evidence, not hardware. Core verification
-proves that it names a resetless, direct, one-bit register chain on one
-destination clock. CIRCT lowering omits the evidence operation and attaches
-the conventional `async_reg = "TRUE"` SystemVerilog attribute only to those
-verified stage registers.
+For `verif.assert`, the backend ANDs the activation guard with the inverse of
+active-high reset and uses that value as CIRCT's assertion enable. The external
+test pipeline lowers the operation to a SystemVerilog concurrent assertion,
+preserves its optional label, places non-synthesizable output behind a
+`SYNTHESIS` guard, and runs Verilator with assertion evaluation enabled.
 
-Synchronous-memory element types are packed to the integer width required by
-`seq.firmem` and bitcast back at port boundaries. A declared Rhodium mask
-granularity determines the `seq.firmem` mask width, and write and read-write
-ports pass their mask operand directly. CIRCT's generated-memory flow preserves
-the declared physical topology, including native 1RW mode, enables, and
-packed-lane masks, before producing its simulation SystemVerilog module. The
-older asynchronous-read `Memory` resource continues to use `seq.hlmem`.
+DPI imports become module-level `sim.func.dpi` declarations. Both DPI operation
+forms convert the Rhodium clock with `seq.to_clock`, pass the explicit enable,
+and differ only in whether the CIRCT call returns SSA results.
 
-`rtl.decode` stays relational until backend lowering. The CIRCT backend emits
-one sparse `sv.case casez`: input-care masks become `z` wildcard positions, and
-partially specified outputs retain `sv.constantX` bits. The verified relation's
-non-overlap makes source row order irrelevant. CIRCT owns SystemVerilog
-emission, and downstream RTL synthesis chooses and optimizes the gate-level
-implementation without an Rhodium-side minimizer or subprocess.
+## Validation ownership
 
-Standalone `rtl.dont_care` values and uncared decode output bits use the same
-`sv.constantX` CIRCT/SV synthesis-freedom carrier.
+Backend host tests assert textual lowering, stable naming, unsupported-type
+errors, and the specialized policies described above. The external fixture
+pipeline separately parses and verifies MLIR, lowers it through CIRCT, compares
+version-pinned SystemVerilog goldens, and simulates selected designs with
+Verilator.
 
-This carrier does not give Rhodium four-state value semantics: the public
-operations only grant synthesis freedom, and frontend operations continue to
-use the ordinary two-state hardware model. A downstream RTL simulator can
-display or propagate the carrier as X, but that behavior is a backend artifact
-rather than an Rhodium language contract.
-
-`verif.assert` combines its frontend-derived activation guard with the inverse
-of active-high reset and uses the result as CIRCT's assertion enable. It lowers
-to `verif.clocked_assert` on the rising clock edge. The external pipeline lowers
-this to a labeled SystemVerilog concurrent assertion, wraps it with a
-`SYNTHESIS` preprocessor guard, and enables assertion evaluation in Verilator.
-
-## API and verification
-
-[`circt.rhm`](circt.rhm) exports `emit_circt(design)`. Emission verifies the
-completed design before lowering. Backend unit tests check textual lowering;
-external integration tests parse and verify MLIR, export SystemVerilog, and
-simulate selected designs with Verilator.
-
-The test and golden-output workflow is documented in
-[`../../tests/backend/README.md`](../../tests/backend/README.md).
+Commands, fixture selection, and golden-update policy belong to
+[`../../tests/backend/README.md`](../../tests/backend/README.md); this document
+does not duplicate that evolving test catalog.

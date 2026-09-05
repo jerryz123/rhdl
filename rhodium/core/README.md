@@ -5,36 +5,130 @@
 The core is Rhodium's backend-independent hardware model. It defines hardware
 meaning, ownership, construction, verification, and inspection; it does not
 import frontend syntax or a backend. The complete package dependency contract
-is in [`../README.md`](../README.md).
+is owned by [`../README.md`](../README.md).
 
-## Elaboration result
+## How to use this guide
+
+- Start with the [mental model](#mental-model) and [semantic model](#semantic-model)
+  when reading or extending Rhodium.
+- Use the [operation reference](#operation-reference) and
+  [public API](#public-api) when constructing or inspecting core IR directly.
+- Use the [implementation map](#implementation-map) to find the owning source
+  and the narrowest relevant tests.
+
+Frontend syntax, profiles, and elaboration policy belong to the
+[`frontend`](../frontend/README.md). Lowering belongs to the
+[`backend`](../backend/README.md). This guide specifies only the common IR
+contract between those producers and consumers.
+
+## Mental model
+
+Rhodium elaborates hardware into one typed dataflow graph per module. Five
+ideas organize that graph:
+
+1. A `Value` is readable data with exactly one defining operation.
+2. A `Place` is a driveable destination with exactly one final binding.
+3. An `Operation` records structure, combinational computation, state,
+   verification collateral, or durable metadata.
+4. A stateful resource such as `Memory` has identity and ownership; it is not
+   data that can flow through a port or mux.
+5. An instance does not own its child module. It references a finished module
+   definition and exposes parent-local `Place` inputs and `Value` outputs.
+
+The normal lifecycle is construction, completion, verification, and then
+consumption:
+
+```mermaid
+flowchart LR
+  Authoring["Frontend elaboration<br/>or direct Builder calls"] --> Builder
+
+  subgraph Core["rhodium/core"]
+    Builder --> Design
+    Design -->|owns| Module
+    Design -->|owns| DPI["DPI imports"]
+    Module -->|contains| Operation
+    Module -->|owns| Value
+    Module -->|owns root| Place
+    Operation -->|defines result| Value
+    Operation -->|references destination| Place
+    Module -->|owns| Resource["Memory resources"]
+    Value -->|one rtl.drive| Place
+    Module --> Finish["Builder.finish(module)"]
+    Finish --> Verify["verify_design(design)"]
+  end
+
+  Verify --> Elaboration["DesignElaboration(design, top)"]
+  Elaboration --> Consumers["backend, formal, analysis,<br/>diagram, and physical views"]
+```
+
+Operation list order makes inspection and printing deterministic. It does not
+create source-order execution semantics. Primitive registers and clocked
+resources introduce time; a cycle made only of combinational dependencies is
+invalid.
+
+## Semantic model
+
+### Elaboration result
 
 Elaboration constructs one public SSA-style dataflow IR. There is no private
 frontend IR or separate high-level and canonical pair. Host computation has
 already finished by the time the core design is verified.
 
-A module body is one dataflow graph. Operation order stabilizes printing but
-does not define execution order. Primitive registers break temporal cycles;
-purely combinational cycles are invalid.
+Each completed module is one dataflow graph. `Builder.finish` closes a module
+and canonicalizes complete aggregate drives. `verify_design` checks the whole
+design, including cross-module ownership and hierarchical combinational
+dependencies. `DesignElaboration` then pairs that design with an explicit,
+finished top module for downstream consumers.
 
-## Values and places
+### Values, places, and binding
 
-A `Value` is readable hardware data with one definition. It is an operation
-result or input-like boundary value and records its type, defining operation,
-users, module, location, and origin.
+A `Value` is readable hardware data. It records its hardware type, containing
+module, defining-operation ID, and users. Source location and origin belong to
+the defining `Operation`, so diagnostics and generated operations retain that
+context without duplicating it on every result.
 
 A `Place` is a destination that must be driven. Internal wires, module outputs,
-instance inputs, and register next-state inputs are places. Driving a place
-creates an explicit `rtl.drive` relationship.
+instance inputs, register next-state inputs, and synchronous-memory input
+fields are places. Driving a root place creates an explicit `rtl.drive`
+operation from a same-typed value.
 
-Every place must have exactly one effective driver. A readable place yields
-its driver's value and must be driven before it is read. Values and places
-belong to one design and one legal module scope.
+Every root place must finish with one effective driver and exactly one
+`rtl.drive` operation. Aggregate places can be projected into record fields or
+vector elements while a module is under construction. Whole-value and
+element-wise drive modes are mutually exclusive; a complete set of leaf drives
+canonicalizes to nested aggregate construction and one whole-value drive.
 
-Aggregate places expose recursively projected record fields and vector
-elements during construction. Whole-value and element-wise drive modes are
-mutually exclusive. A complete set of leaf drives canonicalizes to nested
-aggregate construction and one whole-value drive.
+Most places must be driven before they can be read. A core `rtl.wire` is the
+deliberate exception: it exposes a paired value immediately so construction is
+independent of declaration order. The wire still requires a final driver, and
+verification follows that driver when checking combinational cycles.
+
+Values and places never cross design ownership or module scope directly.
+Communication across hierarchy occurs only through ports.
+
+### Ownership and identity
+
+Ownership is structural, not inferred from names or list position:
+
+| Object | Owner | Contract |
+|---|---|---|
+| `Design` | Root | Owns modules and design-level `DpiImport` declarations; allocates stable numeric IDs. |
+| `Module` | `Design` | Contains ordered operations, ports, values, root places, memories, and extension-owned nonsemantic metadata. |
+| `Operation` | `Module` | References operand values and destination places; defines its result values; carries attributes, location, and origin. |
+| `Value` | `Module` and one defining operation | May be used only by operations in its legal module scope. |
+| `Place` | `Module` and one declaring operation | Receives one final same-type driver; projections remain rooted in that owned place. |
+| `Memory` | `Module` and one `rtl.memory` allocation | Has stable resource identity and may be referenced only by same-module memory operations. |
+| `Port` | `Module` | Presents either an input `Value` or an output `Place`. |
+| `Register`, `Instance`, `SyncMemory` | Returned view over an operation and its endpoints | Groups the core objects that form one state element, child occurrence, or circuit-shaped memory. |
+
+IR identity is distinct from user-facing names. Hardware names are ASCII
+identifiers beginning with a letter or underscore; `__rhodium_` is reserved
+for generated names. Construction goes through `Builder`; after verification,
+the supported public use is read-only inspection. User-authored IR mutation
+and rewriting remain deferred until a transformation motivates coherent
+transaction and handle-validity semantics.
+
+### Hierarchy
 
 At module and instance boundaries:
 
@@ -42,9 +136,42 @@ At module and instance boundaries:
 - A module output is a `Place` that becomes readable after it is driven.
 - A child input is a driveable instance-input `Place` in its parent.
 - A child output is a readable instance-output `Value` in its parent.
-- Communication across hierarchy occurs only through ports.
 
-## Hardware types
+An `rtl.instance` operation is owned by the parent module and references a
+finished module in the same design. Its port endpoints are parent-local; the
+referenced child definition remains design-owned and can be instantiated more
+than once. Instance names are unique only within the parent.
+
+Cycle analysis summarizes which child-output leaves depend combinationally on
+which child-input leaves, then translates those dependencies through the
+parent's instance bindings. Record-field and vector-element paths remain
+distinct through structural operations and hierarchy. Registers and other
+temporal sources stop the dependency walk.
+
+### State and resources
+
+A primitive `Register` groups a readable current value and driveable
+next-state place with a `Clock`. Its reset form additionally has a `Reset` and
+a same-typed reset value. On the active edge, asserted reset loads the reset
+value; otherwise the register loads next state. Reset is active-high and
+synchronous.
+
+A `Memory` is module-owned state rather than a `Value` or `Place`. It has a
+positive host-known depth, an element `DataType`, and one allocation operation.
+`rtl.memory_read_async` produces an ordinary combinational value;
+`rtl.memory_write` is a sequential effect carrying address, data, clock, and
+one-bit enable. Multiple writes represent independent physical ports and must
+share one clock. Address dependencies through asynchronous reads participate
+in combinational-cycle checking.
+
+A `SyncMemory` is a distinct circuit-shaped primitive, not an indexed
+`Memory`. It records one clock and creates its typed input places and output
+values together. The current Builder admits 1R, 1W, 1R1W, and 1RW shapes; port
+collections retain their physical kinds without yet exposing general
+multi-port construction. Its detailed timing, masking, and undefined-behavior
+contract is in the [synchronous-memory reference](#synchronous-memories).
+
+## Type reference
 
 The core type capabilities are open interfaces:
 
@@ -66,7 +193,7 @@ without core special cases.
 Equal-width representations cross types only through explicit `rtl.cast`.
 Clock selection is never an ordinary data mux.
 
-### Records
+### Records and vectors
 
 `RecordType` is an ordered, nonempty structural `DataType` with unique field
 names. Field names, order, and recursively equal field types participate in
@@ -74,8 +201,6 @@ names. Field names, order, and recursively equal field types participate in
 it does not make structurally equal records distinct. A packable record has no
 padding. Its first declared field occupies the most-significant bits,
 recursively.
-
-### Vectors
 
 `VectorType` has a positive host-known length and one recursively equal element
 `DataType`. A packable vector has no padding, and element zero occupies the
@@ -97,32 +222,26 @@ nested vectors and record elements.
 - Expanding arithmetic is frontend composition over explicit extensions and
   modular core operations.
 
-## Operation model
+## Operation reference
 
 Operations use namespaced `rtl.*`, `cdc.*`, `verif.*`, and `sim.*` opcodes plus
-a static schema registry instead of a closed node-class hierarchy. A schema
-defines arity, required attributes, type constraints, semantic category,
-verification, and printing. Backend lowering choices are not part of core
-schemas.
+the static registry in [`ops.rhm`](ops.rhm), rather than a closed node-class
+hierarchy. Each `OperationSchema` records semantic category, operand/result/
+place arity, required attributes, a verifier type rule, and a printer form.
+Backend lowering choices are not part of core schemas.
 
-| Group | Core operations |
+| Group | Core opcodes |
 |---|---|
-| Structure | input port, output port, drive, instance |
-| Internal connection | wire |
-| Sources | constant, synthesis don't-care |
-| Bitwise | not, and, or, xor |
-| Arithmetic | add, sub, multiply, logical left, unsigned-right, and signed-right shift |
-| Comparison | equality, unsigned less-than, signed less-than |
-| Selection | mux lookup, incompletely specified decode relation |
-| Conversion | cast |
-| Width-changing | concat, extract, zero extension, sign extension, truncation |
-| Records | record create and field extraction |
-| Vectors | vector create, host-static extraction, dynamic index and injection |
-| Memories | resource allocation, asynchronous read, synchronous write, circuit-shaped synchronous memory |
-| Sequential | register with optional synchronous reset |
-| Crossing evidence | stable one-bit level crossing tied to ordinary register stages |
-| Verification | guarded, reset-suppressed clocked assertion |
-| Simulation | clocked DPI procedure call and explicit DPI result registers |
+| Structure | `rtl.input_port`, `rtl.output_port`, `rtl.wire`, `rtl.drive`, `rtl.instance` |
+| Sources | `rtl.constant`, `rtl.dont_care` |
+| Bitwise and arithmetic | `rtl.not`, `rtl.and`, `rtl.or`, `rtl.xor`, `rtl.add`, `rtl.sub`, `rtl.mul`, `rtl.shl`, `rtl.shru`, `rtl.shrs` |
+| Comparison and selection | `rtl.eq`, `rtl.ult`, `rtl.slt`, `rtl.mux_lookup`, `rtl.onehot_mux`, `rtl.decode` |
+| Conversion and width | `rtl.cast`, `rtl.concat`, `rtl.extract`, `rtl.zext`, `rtl.sext`, `rtl.trunc` |
+| Aggregates | `rtl.record_create`, `rtl.record_get`, `rtl.vector_create`, `rtl.vector_get`, `rtl.vector_index`, `rtl.vector_inject`, `rtl.vector_write_set` |
+| Memories and registers | `rtl.memory`, `rtl.memory_read_async`, `rtl.memory_write`, `rtl.sync_memory`, `rtl.register`, `rtl.register_reset` |
+| Crossing evidence | `cdc.sync_level` |
+| Verification | `verif.assert` |
+| Simulation | `sim.dpi_call`, `sim.dpi_register` |
 
 Representative type rules are:
 
@@ -168,6 +287,8 @@ dpi_register(function, Clock, enable,
              args...)                       -> one or more flat result types
 ```
 
+### Selection and partial values
+
 Mux keys are unique nonnegative host integers that fit the selector width and
 are normalized into increasing order. Every lookup has a default and at least
 one case. There is no `rtl.mux`: a binary Boolean mux is a frontend
@@ -190,9 +311,9 @@ is a caller precondition; zero-hot and multi-hot selectors have an unspecified
 result. This permits direct selector-bit gating and reduction without validity
 logic or a default value.
 
-There is also no conditional-connect operation or general control-flow
-region. Frontend hardware conditionals canonicalize to mux lookups and one
-final drive.
+There is no conditional-connect operation or general control-flow region.
+Frontend hardware conditionals canonicalize to mux lookups and one final
+drive.
 
 `rtl.dont_care` is deliberately narrower than an unknown-value model. It is a
 zero-operand `Bits` source whose bits may be chosen independently by synthesis.
@@ -210,39 +331,14 @@ records and vectors. Backends may choose any implementation satisfying the
 relation, so core does not expand a decode into a particular mux or gate
 network.
 
-## Stateful resources
+### Synchronous memories
 
-### Registers
-
-A primitive register contains a readable current value, driveable next-state
-place, `Clock`, optional `Reset`, and a reset value exactly when reset is
-present. On the active edge, asserted reset loads the reset value; otherwise
-the register loads next state. Reset is active-high and synchronous.
-
-### Memories
-
-A `Memory` has stable identity, an owning module, positive host-known depth,
-element `DataType`, and allocation operation. It is a resource rather than a
-`Value` or `Place`.
-
-`rtl.memory_read_async` produces an ordinary combinational value.
-`rtl.memory_write` is a sequential effect carrying address, data, clock, and
-enable. Multiple writes represent independent physical ports and must share
-one clock. Address dependencies through asynchronous reads participate in
-combinational-cycle checking.
-
-A `SyncMemory` is a distinct circuit-shaped primitive, not an indexed
-`Memory`. It owns one clock and typed collections of read, write, and shared
-read-write ports. The current Builder admits 1R, 1W, 1R1W, and 1RW shapes; the
-collections preserve the physical port kinds without yet exposing general
-multi-port construction.
-
-A read port has driveable `address` and one-bit `enable` fields plus readable
-`data`. A write port has driveable `address`, `data`, and one-bit `enable`. A
-shared read-write port has driveable `address`, `enable`, one-bit `write`, and
-`write_data` fields plus readable `read_data`. With an enabled shared port,
-`write = 0` selects a read and `write = 1` selects a write. Addresses are
-exactly `Bits(index_width(depth))`.
+A synchronous-memory read port has driveable `address` and one-bit `enable`
+fields plus readable `data`. A write port has driveable `address`, `data`, and
+one-bit `enable`. A shared read-write port has driveable `address`, `enable`,
+one-bit `write`, and `write_data` fields plus readable `read_data`. With an
+enabled shared port, `write = 0` selects a read and `write = 1` selects a write.
+Addresses are exactly `Bits(index_width(depth))`.
 
 A memory may optionally declare a positive host-known mask granularity that
 evenly divides the packed element width. Each write port then gains a required
@@ -252,37 +348,45 @@ packed granule. A one writes that granule and a zero preserves its stored bits.
 The layout belongs to the memory and will be shared by every future
 write-capable port. Masking requires a statically packable element type.
 
-An enabled read presents its data one rising edge after its address is
-sampled. Read output while its enable is false, or after a shared-port write,
-is unspecified. An all-zero mask preserves every stored bit but remains a
+An enabled read presents its data one rising edge after its address is sampled.
+Read output while its enable is false, or after a shared-port write, is
+unspecified. An all-zero mask preserves every stored bit but remains a
 write-mode cycle on a shared port. Initial contents, out-of-range addresses,
 and collisions between separate ports are unspecified. The primitive has no
 reset, initialization, inferred ports, or direct indexing.
 
 ### DPI simulation operations
 
-DPI imports belong to a design and have flat signatures. A function has zero
-or more ordered `out` results followed by exactly one `return` result. A
-result-less `sim.dpi_call` represents a clocked procedure effect. A
-result-bearing `sim.dpi_register` produces one visible state value per result;
-all hold while disabled. Both operations carry an explicit clock and one-bit
-hardware enable. They are deliberately unsynthesizable core semantics rather
-than frontend-only annotations.
+DPI imports belong to a design and have one or more named flat inputs. A
+procedure has no results. A function has zero or more ordered `out` results
+followed by exactly one `return` result. A result-less `sim.dpi_call` represents
+a clocked procedure effect. A result-bearing `sim.dpi_register` produces one
+visible state value per result; all hold while disabled. Both operations carry
+an explicit clock and one-bit hardware enable. They are deliberately
+unsynthesizable core semantics rather than frontend-only annotations.
 
 ### Clocked assertions
 
 `verif.assert` checks a readable one-bit condition on each rising clock edge
 while its one-bit guard is asserted. It is disabled while its active-high reset
 operand is asserted. Frontends use the guard to record lexical activation from
-hardware conditionals; it is not a user-facing assertion enable. The optional
-label is an ASCII identifier used to identify the check after backend lowering.
-Assertions have no results, places, or hidden state; they remain verification
-collateral in every containing module and therefore apply independently to
-every instance.
+hardware conditionals; it is not a user-facing assertion enable or a hidden
+state element. The optional label is an ASCII identifier used to identify the
+check after backend lowering. Assertions have no results or places; they
+remain verification collateral in every containing module and therefore apply
+independently to every instance.
 
 The core operation is deliberately limited to a current-cycle condition. It
 does not define temporal sequences, formatted messages, assumptions, coverage,
 or immediate combinational checks.
+
+### Stable-level crossing evidence
+
+`cdc.sync_level` is a zero-result metadata operation tying a stable one-bit
+source and destination clock to at least two ordinary, resetless register
+stages. The operation is core because the promise must survive into downstream
+inspection; clock-compatibility policy and reports remain owned by
+[`analysis`](../analysis/README.md).
 
 ## Public API
 
@@ -294,20 +398,10 @@ Value         Place              Port        Register    Memory       SyncMemory
 Instance      HardwareType       Location    Origin
 ```
 
-An operation owns operands, results, places, attributes, a location, and an
-origin. The IR is a read-only inspection API: callers can walk designs,
-modules, and operations; follow value definitions and users; and print
-deterministic text with `dump_ir`.
-
-`DesignElaboration` pairs a verified design with its explicit top module for
-downstream consumers. `Module.find_instance(name)` returns the stable direct
+Callers can walk designs, modules, and operations; follow definitions,
+drivers, and users; find direct instances by final name; and print deterministic
+text with `dump_ir`. `Module.find_instance(name)` returns the stable direct
 `rtl.instance` operation rather than relying on operation or module order.
-
-IR identity is separate from user-facing names. Hardware names are ASCII
-identifiers beginning with a letter or underscore; `__rhodium_` is reserved for
-generated names. User-authored mutation and rewriting remain deferred until a
-concrete transformation motivates coherent transaction and handle-validity
-semantics.
 
 ### Builder
 
@@ -329,31 +423,30 @@ verify_design(design)
 dump_ir(design)
 ```
 
-The Builder owns one design and edits an explicit module. It rejects locally
-impossible construction immediately; whole-graph checks run at verification
-boundaries. `Builder.instance` uses an exact name, while
-`Builder.suggested_instance` deterministically allocates a collision-free name.
+The Builder owns one design and edits an explicit open module. It rejects
+locally impossible construction immediately; whole-graph checks run at
+verification boundaries. `Builder.instance` uses an exact name, while
+`Builder.suggested_instance` deterministically allocates a collision-free
+name.
 
-The core API is exported by [`main.rhm`](main.rhm). CIRCT is imported
+The core API is re-exported by [`main.rhm`](main.rhm). CIRCT is imported
 separately from [`../backend/circt.rhm`](../backend/circt.rhm). Optional
 clock-use and temporal-provenance inspection is exported separately by
 [`../analysis/clocking.rhm`](../analysis/clocking.rhm); those policy, report,
-and environment objects are not part of the core API. The zero-result
-`cdc.sync_level` operation is core because it is durable, backend-independent
-evidence tying a stable one-bit source and destination clock to ordinary
-register stages; compatibility decisions remain in analysis.
+and environment objects are not part of the core API.
 
 ## Verification contract
 
 The Builder and whole-design verifier enforce:
 
-1. Every value and place belongs to exactly one design.
+1. Every value and root place belongs to exactly one design and one module.
 2. Values are used only in legal module scopes.
 3. Input ports are never driven.
-4. Every output, instance input, register next-state place, and synchronous
-   memory input field has exactly one effective driver.
+4. Every output, instance input, register next-state place, and synchronous-
+   memory input field has exactly one effective driver and drive operation.
 5. A place and its driver have exactly the same hardware type.
-6. Operation operands, results, places, and attributes satisfy their schema.
+6. Operation operands, results, places, attributes, and types satisfy their
+   registered schema.
 7. Record fields and vector elements match their aggregate type completely;
    whole and element-wise drive modes remain consistent.
 8. Mux selectors, keys, cases, and defaults are well typed and valid.
@@ -377,5 +470,36 @@ The Builder and whole-design verifier enforce:
     depend on every source leaf.
 
 The frontend separately rejects active recursive generator elaboration,
-runtime hardware circuit parameters, and hardware-controlled host
-computation. Compilation verifies every completed design before lowering.
+runtime hardware circuit parameters, and hardware-controlled host computation.
+Compilation verifies every completed design before lowering.
+
+## Implementation map
+
+| File | Owns | Focused evidence |
+|---|---|---|
+| [`types.rhm`](types.rhm) | Open type capabilities, built-in types, equality, packing, and selector widths | [`types-test.rhm`](../../tests/core/types-test.rhm), [`signed-test.rhm`](../../tests/core/signed-test.rhm), [`shift-test.rhm`](../../tests/core/shift-test.rhm) |
+| [`ir.rhm`](ir.rhm) | Public objects, collections, ownership indexes, lookup, and `DesignElaboration` | [`verify-test.rhm`](../../tests/core/verify-test.rhm), [`dpi-test.rhm`](../../tests/core/dpi-test.rhm) |
+| [`builder.rhm`](builder.rhm) | Legal construction, naming, aggregate-drive canonicalization, state, resources, and hierarchy | [`wire-test.rhm`](../../tests/core/wire-test.rhm), [`memory-test.rhm`](../../tests/core/memory-test.rhm), [`sync-memory-test.rhm`](../../tests/core/sync-memory-test.rhm) |
+| [`ops.rhm`](ops.rhm) | Opcode registry, categories, arities, type-rule names, and printer forms | Operation-specific tests under [`tests/core`](../../tests/core/) |
+| [`verify.rhm`](verify.rhm) | Schema, ownership, use-def, driver, resource, state, instance, assertion, DPI, and crossing checks | [`verify-test.rhm`](../../tests/core/verify-test.rhm), [`assert-test.rhm`](../../tests/core/assert-test.rhm), [`cdc-test.rhm`](../../tests/core/cdc-test.rhm) |
+| [`dependencies.rhm`](dependencies.rhm) | Leaf-sensitive combinational dependencies and hierarchical cycle detection | Hierarchy and aggregate-cycle cases in [`verify-test.rhm`](../../tests/core/verify-test.rhm) |
+| [`printer.rhm`](printer.rhm) | Deterministic textual IR | Exact operation-form checks across [`tests/core`](../../tests/core/) |
+| [`main.rhm`](main.rhm) | Public core re-exports | Import coverage through all core tests |
+
+## Focused validation
+
+Choose the smallest test file or files matching the contract changed:
+
+- Value/place ownership, aggregate drives, or hierarchy: `wire-test.rhm`,
+  `types-test.rhm`, and the relevant cases in `verify-test.rhm`.
+- An opcode or type rule: its operation-specific test plus `types-test.rhm` or
+  `verify-test.rhm` when the shared verifier changes.
+- State or resource behavior: `memory-test.rhm`, `sync-memory-test.rhm`,
+  `assert-test.rhm`, `cdc-test.rhm`, or `dpi-test.rhm` as applicable.
+- Package imports or module movement: `make check-boundaries` in addition to
+  the focused semantic test.
+
+Run Rhombus tests with the repository test runner and a fresh
+`PLTCOMPILEDROOTS`, as described by the owning [test guide](../../tests/README.md).
+Reserve frontend, backend, and full-suite validation for changes that actually
+cross those boundaries.
