@@ -508,7 +508,7 @@ turns an externally credited flit channel into a buffered internal flow.
 | [`channels.rhdl`](channels.rhdl) | Ready-valid channel interfaces recursively composed into RN-I, RN-F, SN, HN-I, and HN-F contracts; multi-requester HN snoops carry destination NodeID beside the exact target-less SNP flit until endpoint ejection |
 | [`noc-authoring.rhm`](noc-authoring.rhm) | Pure RN/SN sites and logical CHI connections compiled directly into independent validated REQ, RSP, SNP, and DAT channel results with derived route keys; RN-I connections omit SNP while RN-F connections add it |
 | [`noc-adapter.rhdl`](noc-adapter.rhdl) | REQ, RSP, SNP, and DAT destination selection plus typed wrappers around protocol-neutral routed-flow stages; reusable RN, HN-requester, HN-subordinate, and SN-node attachments connect complete channel roles, while family adapters compile every `(site key, target NodeID)` relation into one decode table before RTL elaboration |
-| [`noc-router.rhdl`](noc-router.rhdl) | A four-plane CHI router shell over independent generic router families, a shared topology-only physical-link manifest, and precompiled local attachment plans |
+| [`noc-router.rhdl`](noc-router.rhdl) | A composable three- or four-plane CHI router shell over independent generic router families, a shared topology-only physical-link manifest, category-specific local attachment plans, and reusable family wiring |
 | [`monitor.rhdl`](monitor.rhdl) | Implemented explicit endpoint monitors and link-local activation, credit, opcode, NodeID, Size, and DataID checks |
 | [`transaction.rhdl`](transaction.rhdl) | Implemented bounded initial non-coherent TxnID, DBID, response, and complete physical DataID-set checks; general ordering remains planned |
 | [`coherent-transaction.rhdl`](coherent-transaction.rhdl) | Implemented bounded RN-F `ReadShared`/`ReadClean`/`ReadUnique` packet, retry-shaped repetition, paired DVM, and snoop-response lifetime checks |
@@ -535,13 +535,15 @@ the containing system retain topology, routing-policy, router, and physical
 link ownership.
 
 The initial tiled transport uses a topology-only `RouterFamilyPhysicalPlan` to
-prove that independently routed REQ, RSP, SNP, and DAT families share one
-ordered physical-link shape. Host-compiled local attachment plans account for
-family-remapped slots and unused ports. `CHIRouter` stamps four generic router
-families without owning topology or routing policy. Its attachment plans cover
-RN-I, RN-F, mixed RN-F/RN-I, HN-I, HN-F, and transit-only sites without adding
-snoop paths to non-coherent endpoints. Tile modules own router instances,
-while the SoC parent owns inter-tile links. Cache-line-striped Home
+prove that independently routed REQ, RSP, optional SNP, and DAT families share
+one ordered physical-link shape. Host-compiled `CHIRouterAttachments` compose
+RN-I, RN-F, HN requester, HN subordinate, and SN local-port categories on one
+router without combination-specific attachment classes. RN-I/HN-I/SN-only
+fabrics omit the SNP router and physical link field entirely; RN-F and HN-F
+requester attachments require it. `connect_chi_router_family` wires a complete
+compiled family and terminates unused uniform link-array entries. Tile modules
+own router instances, while their containing fabric owns inter-router links.
+Cache-line-striped Home
 services project sparse global addresses into dense local CHIRam spaces before
 optional fragmentation.
 

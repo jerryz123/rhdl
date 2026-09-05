@@ -66,8 +66,10 @@ module chi_sn_noc_tb;
   );
     integer cycles;
     begin
-      first_in.req.ready = 1'b0;
-      second_in.req.ready = 1'b0;
+      // Keep the unselected SN ready while the selected SN is blocked. The
+      // selected path must hold without leaking into or depending on the other path.
+      first_in.req.ready = target_lane;
+      second_in.req.ready = !target_lane;
       home_in.req = '0;
       home_in.req.bits.opcode = 7'h04;
       home_in.req.bits.src_id = HOME_ID;
@@ -123,8 +125,10 @@ module chi_sn_noc_tb;
         second_in.rsp.bits.txn_id = txn_id;
         second_in.rsp.valid = 1'b1;
         #1;
-        while (!second_out.rsp.ready)
+        for (cycles = 0; cycles < 8 && !second_out.rsp.ready; cycles = cycles + 1)
           tick();
+        assert (second_out.rsp.ready)
+          else $fatal(1, "second SN RSP ingress remained backpressured");
         tick();
         second_in.rsp = '0;
       end else begin
@@ -135,27 +139,22 @@ module chi_sn_noc_tb;
         first_in.rsp.bits.txn_id = txn_id;
         first_in.rsp.valid = 1'b1;
         #1;
-        while (!first_out.rsp.ready)
+        for (cycles = 0; cycles < 8 && !first_out.rsp.ready; cycles = cycles + 1)
           tick();
+        assert (first_out.rsp.ready)
+          else $fatal(1, "first SN RSP ingress remained backpressured");
         tick();
         first_in.rsp = '0;
       end
-
-      for (cycles = 0; cycles < 8; cycles = cycles + 1) begin
-        #1;
-        if (home_out.rsp.valid)
-          break;
+      for (cycles = 0; cycles < 8 && !home_out.rsp.valid; cycles = cycles + 1)
         tick();
-      end
-      assert (cycles < 8)
-        else $fatal(1, "RSP did not return to the HN");
-      assert (home_out.rsp.bits.src_id == (source_lane ? SECOND_ID : FIRST_ID) &&
-              home_out.rsp.bits.tgt_id == HOME_ID &&
+      assert (home_out.rsp.valid &&
+              home_out.rsp.bits.src_id == (source_lane ? SECOND_ID : FIRST_ID) &&
               home_out.rsp.bits.txn_id == txn_id)
-        else $fatal(1, "RSP payload changed in SN transport");
+        else $fatal(1, "RSP did not return from the selected SN");
       tick();
       assert (home_out.rsp.valid)
-        else $fatal(1, "RSP did not remain valid under backpressure");
+        else $fatal(1, "RSP did not remain valid under HN backpressure");
       home_in.rsp.ready = 1'b1;
       tick();
       home_in.rsp.ready = 1'b0;

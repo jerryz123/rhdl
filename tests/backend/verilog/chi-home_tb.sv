@@ -60,7 +60,9 @@ module chi_home_tb;
   localparam logic [6:0] REQUESTER_ID = 7'h03;
   localparam logic [6:0] HOME_ID = 7'h05;
   localparam logic [6:0] SUBORDINATE_ID = 7'h09;
+  localparam logic [6:0] SECOND_SUBORDINATE_ID = 7'h0a;
   localparam logic [11:0] SUBORDINATE_DBID = 12'h055;
+  localparam logic [11:0] SECOND_SUBORDINATE_DBID = 12'h066;
   localparam logic [127:0] READ_DATA = 128'h00112233445566778899aabbccddeeff;
   localparam logic [127:0] WRITE_DATA = 128'hffeeddccbbaa99887766554433221100;
 
@@ -262,7 +264,10 @@ module chi_home_tb;
   endtask
 
   logic [11:0] slot;
-  logic [11:0] home_dbid;
+  logic [11:0] first_slot;
+  logic [11:0] second_slot;
+  logic [11:0] first_home_dbid;
+  logic [11:0] second_home_dbid;
   logic [11:0] completion_dbid;
 
   initial begin
@@ -295,35 +300,60 @@ module chi_home_tb;
                       12'h103,
                       12'h503,
                       44'h090000000,
-                      7'h0a,
+                      SECOND_SUBORDINATE_ID,
                       slot);
-    translate_subordinate_data(slot, 12'h503, 2'd0, 7'h0a, READ_DATA);
+    translate_subordinate_data(slot, 12'h503, 2'd0, SECOND_SUBORDINATE_ID, READ_DATA);
 
     translate_request(WRITE_NO_SNP_FULL,
-                      6'd6,
+                      6'd4,
                       12'h102,
                       12'h000,
+                      44'h080000000,
+                      SUBORDINATE_ID,
+                      first_slot);
+    translate_request(WRITE_NO_SNP_FULL,
+                      6'd4,
+                      12'h104,
+                      12'h000,
                       44'h090000000,
-                      7'h0a,
-                      slot);
+                      SECOND_SUBORDINATE_ID,
+                      second_slot);
+    // Return the second subordinate's DBID first. Each slot must retain its
+    // independently selected subordinate and subordinate-local DBID.
     translate_subordinate_response(DBID_RESP,
-                                   slot,
+                                   second_slot,
+                                   SECOND_SUBORDINATE_DBID,
+                                   12'h104,
+                                   SECOND_SUBORDINATE_ID,
+                                   second_home_dbid);
+    translate_subordinate_response(DBID_RESP,
+                                   first_slot,
                                    SUBORDINATE_DBID,
                                    12'h102,
-                                   7'h0a,
-                                   home_dbid);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd2, 7'h0a, WRITE_DATA + 2);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd0, 7'h0a, WRITE_DATA + 0);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd3, 7'h0a, WRITE_DATA + 3);
-    translate_write_data(home_dbid, SUBORDINATE_DBID, 2'd1, 7'h0a, WRITE_DATA + 1);
+                                   SUBORDINATE_ID,
+                                   first_home_dbid);
+    translate_write_data(first_home_dbid, SUBORDINATE_DBID, 2'd0, SUBORDINATE_ID, WRITE_DATA);
+    translate_write_data(second_home_dbid,
+                         SECOND_SUBORDINATE_DBID,
+                         2'd0,
+                         SECOND_SUBORDINATE_ID,
+                         WRITE_DATA + 1);
     translate_subordinate_response(COMP,
-                                   slot,
+                                   first_slot,
                                    SUBORDINATE_DBID,
                                    12'h102,
-                                   7'h0a,
+                                   SUBORDINATE_ID,
                                    completion_dbid);
-    assert (completion_dbid == home_dbid)
-      else $fatal(1, "completion did not preserve the HN-I DBID");
+    assert (completion_dbid == first_home_dbid)
+      else $fatal(1, "first completion did not preserve the HN-I DBID");
+    translate_subordinate_response(COMP,
+                                   second_slot,
+                                   SECOND_SUBORDINATE_DBID,
+                                   12'h104,
+                                   SECOND_SUBORDINATE_ID,
+                                   completion_dbid);
+    assert (completion_dbid == second_home_dbid)
+      else $fatal(1, "second completion did not preserve the HN-I DBID");
 
     $display("CHI HN-I decoupled simulation passed");
     $finish;

@@ -1,0 +1,272 @@
+#lang rhodium
+// Elaborates one HN-I over shared and split composable CHI router fabrics without a SNP plane.
+
+import:
+  lib("chi/main.rhdl") open
+  lib("examples/chi/home.rhdl") as home_fixture
+  lib("noc/authoring/main.rhm") open
+  lib("noc/language/main.rhm").topology
+  lib("noc/plan/main.rhm") open
+  lib("noc/rtl/router.rhdl") open
+
+def composition_flit = home_fixture.home_flit
+
+def shared_topology = topology:
+  vc_group transport: 1
+  node local
+  node transit
+  directed local_transit:
+    local -> transit
+    vcs [transport]
+  directed transit_local:
+    transit -> local
+    vcs [transport]
+def shared_router = shared_topology.node("local")
+def shared_transit_router = shared_topology.node("transit")
+def shared_rni = CHIRNSite(NamePath(["requester"]), 3, shared_router)
+def shared_hni_requester = CHIRNICNSite(NamePath(["home", "requester"]), 5, shared_router)
+def shared_hni_subordinate = CHISNICNSite(NamePath(["home", "subordinate"]), 5, shared_router)
+def shared_first_sn = CHISNSite(NamePath(["subordinates", "first"]), 9, shared_router)
+def shared_second_sn = CHISNSite(NamePath(["subordinates", "second"]), 10, shared_router)
+def shared_connections = [
+  CHIRNIConnection(shared_rni, shared_hni_requester),
+  CHISNConnection(shared_hni_subordinate, shared_first_sn),
+  CHISNConnection(shared_hni_subordinate, shared_second_sn)
+]
+def shared_compilations = compile_chi_connections(
+  shared_topology,
+  shared_connections,
+  uniform_chi_routing(deny_all)
+)
+def shared_req_family = RouterFamilyPlan(shared_compilations.req.network.network_plan)
+def shared_rsp_family = RouterFamilyPlan(shared_compilations.rsp.network.network_plan)
+def shared_dat_family = RouterFamilyPlan(shared_compilations.dat.network.network_plan)
+def shared_physical = RouterFamilyPhysicalPlan(shared_req_family)
+def shared_adapters = CHIChannelAdapterPlans(
+  compile_chi_channel_family_adapter_plan(shared_compilations.req, shared_req_family, composition_flit),
+  compile_chi_channel_family_adapter_plan(shared_compilations.rsp, shared_rsp_family, composition_flit),
+  #false,
+  compile_chi_channel_family_adapter_plan(shared_compilations.dat, shared_dat_family, composition_flit)
+)
+def shared_router_configs = CHIRouterFamilyConfigs(
+  compile_simple_router_family(shared_req_family),
+  compile_simple_router_family(shared_rsp_family),
+  #false,
+  compile_simple_router_family(shared_dat_family),
+  shared_physical
+)
+def shared_attachment = CHIRouterAttachments(
+  ~rni_sites: [[shared_rni]],
+  ~hni_requester_sites: [[shared_hni_requester]],
+  ~hn_subordinate_sites: [[shared_hni_subordinate]],
+  ~sn_sites: [[shared_first_sn, shared_second_sn]]
+)
+def shared_router_params = CHIRouterParams(
+  composition_flit,
+  shared_router_configs,
+  compile_chi_router_attachment_plan(shared_router_configs, shared_adapters, shared_attachment)
+)
+def shared_transit_params = CHIRouterParams(
+  composition_flit,
+  shared_router_configs,
+  compile_chi_router_attachment_plan(shared_router_configs, shared_adapters, CHIRouterAttachments())
+)
+def shared_site_key = shared_req_family.site_key(
+  shared_compilations.req.network.router_id(shared_router)
+)
+def shared_transit_site_key = shared_req_family.site_key(
+  shared_compilations.req.network.router_id(shared_transit_router)
+)
+sync_circuit CHISharedRouterCompositionFixture():
+  interface requester(CHIRNIChannels(composition_flit), ~role: icn)
+  interface first(CHISNChannels(composition_flit), ~role: icn)
+  interface second(CHISNChannels(composition_flit), ~role: icn)
+
+  inst home(CHIHNI(home_fixture.home_params))
+  inst router(CHIRouter(shared_router_params))
+  inst transit(CHIRouter(shared_transit_params))
+  router.site_key <== bits(shared_site_key, shared_router_configs.req.route_decoder.site_width)
+  transit.site_key <== bits(shared_transit_site_key, shared_router_configs.req.route_decoder.site_width)
+  requester <=> router.rni_local[0]
+  home.port.requester <=> router.hni_requester_local[0]
+  home.port.subordinate <=> router.hn_subordinate_local[0]
+  first <=> router.sn_local[0]
+  second <=> router.sn_local[1]
+  connect_chi_router_family(
+    shared_physical,
+    [CHIRouterEndpoints(shared_site_key, router.incoming_links, router.outgoing_links),
+     CHIRouterEndpoints(shared_transit_site_key, transit.incoming_links, transit.outgoing_links)],
+    ~snp: #false
+  )
+
+def shared_design = elaborate(CHISharedRouterCompositionFixture())
+
+def requester_topology = topology:
+  vc_group transport: 1
+  node local
+  node transit
+  directed local_transit:
+    local -> transit
+    vcs [transport]
+  directed transit_local:
+    transit -> local
+    vcs [transport]
+def requester_router = requester_topology.node("local")
+def requester_transit_router = requester_topology.node("transit")
+def split_rni = CHIRNSite(NamePath(["requester"]), 3, requester_router)
+def split_hni_requester = CHIRNICNSite(NamePath(["home", "requester"]), 5, requester_router)
+def requester_compilations = compile_chi_connections(
+  requester_topology,
+  [CHIRNIConnection(split_rni, split_hni_requester)],
+  uniform_chi_routing(deny_all)
+)
+def requester_req_family = RouterFamilyPlan(requester_compilations.req.network.network_plan)
+def requester_rsp_family = RouterFamilyPlan(requester_compilations.rsp.network.network_plan)
+def requester_dat_family = RouterFamilyPlan(requester_compilations.dat.network.network_plan)
+def requester_physical = RouterFamilyPhysicalPlan(requester_req_family)
+def requester_adapters = CHIChannelAdapterPlans(
+  compile_chi_channel_family_adapter_plan(requester_compilations.req, requester_req_family, composition_flit),
+  compile_chi_channel_family_adapter_plan(requester_compilations.rsp, requester_rsp_family, composition_flit),
+  #false,
+  compile_chi_channel_family_adapter_plan(requester_compilations.dat, requester_dat_family, composition_flit)
+)
+def requester_router_configs = CHIRouterFamilyConfigs(
+  compile_simple_router_family(requester_req_family),
+  compile_simple_router_family(requester_rsp_family),
+  #false,
+  compile_simple_router_family(requester_dat_family),
+  requester_physical
+)
+def requester_attachment = CHIRouterAttachments(
+  ~rni_sites: [[split_rni]],
+  ~hni_requester_sites: [[split_hni_requester]]
+)
+def requester_router_params = CHIRouterParams(
+  composition_flit,
+  requester_router_configs,
+  compile_chi_router_attachment_plan(requester_router_configs, requester_adapters, requester_attachment)
+)
+def requester_transit_params = CHIRouterParams(
+  composition_flit,
+  requester_router_configs,
+  compile_chi_router_attachment_plan(requester_router_configs, requester_adapters, CHIRouterAttachments())
+)
+def requester_site_key = requester_req_family.site_key(
+  requester_compilations.req.network.router_id(requester_router)
+)
+def requester_transit_site_key = requester_req_family.site_key(
+  requester_compilations.req.network.router_id(requester_transit_router)
+)
+
+def subordinate_topology = topology:
+  vc_group transport: 1
+  node local
+  node transit
+  directed local_transit:
+    local -> transit
+    vcs [transport]
+  directed transit_local:
+    transit -> local
+    vcs [transport]
+def subordinate_router = subordinate_topology.node("local")
+def subordinate_transit_router = subordinate_topology.node("transit")
+def split_hni_subordinate = CHISNICNSite(NamePath(["home", "subordinate"]), 5, subordinate_router)
+def split_first_sn = CHISNSite(NamePath(["subordinates", "first"]), 9, subordinate_router)
+def split_second_sn = CHISNSite(NamePath(["subordinates", "second"]), 10, subordinate_router)
+def subordinate_connections = [
+  CHISNConnection(split_hni_subordinate, split_first_sn),
+  CHISNConnection(split_hni_subordinate, split_second_sn)
+]
+def subordinate_compilations = compile_chi_connections(
+  subordinate_topology,
+  subordinate_connections,
+  uniform_chi_routing(deny_all)
+)
+def subordinate_req_family = RouterFamilyPlan(subordinate_compilations.req.network.network_plan)
+def subordinate_rsp_family = RouterFamilyPlan(subordinate_compilations.rsp.network.network_plan)
+def subordinate_dat_family = RouterFamilyPlan(subordinate_compilations.dat.network.network_plan)
+def subordinate_physical = RouterFamilyPhysicalPlan(subordinate_req_family)
+def subordinate_adapters = CHIChannelAdapterPlans(
+  compile_chi_channel_family_adapter_plan(subordinate_compilations.req, subordinate_req_family, composition_flit),
+  compile_chi_channel_family_adapter_plan(subordinate_compilations.rsp, subordinate_rsp_family, composition_flit),
+  #false,
+  compile_chi_channel_family_adapter_plan(subordinate_compilations.dat, subordinate_dat_family, composition_flit)
+)
+def subordinate_router_configs = CHIRouterFamilyConfigs(
+  compile_simple_router_family(subordinate_req_family),
+  compile_simple_router_family(subordinate_rsp_family),
+  #false,
+  compile_simple_router_family(subordinate_dat_family),
+  subordinate_physical
+)
+def subordinate_attachment = CHIRouterAttachments(
+  ~hn_subordinate_sites: [[split_hni_subordinate]],
+  ~sn_sites: [[split_first_sn, split_second_sn]]
+)
+def subordinate_router_params = CHIRouterParams(
+  composition_flit,
+  subordinate_router_configs,
+  compile_chi_router_attachment_plan(subordinate_router_configs, subordinate_adapters, subordinate_attachment)
+)
+def subordinate_transit_params = CHIRouterParams(
+  composition_flit,
+  subordinate_router_configs,
+  compile_chi_router_attachment_plan(subordinate_router_configs, subordinate_adapters, CHIRouterAttachments())
+)
+def subordinate_site_key = subordinate_req_family.site_key(
+  subordinate_compilations.req.network.router_id(subordinate_router)
+)
+def subordinate_transit_site_key = subordinate_req_family.site_key(
+  subordinate_compilations.req.network.router_id(subordinate_transit_router)
+)
+
+sync_circuit CHISplitRouterCompositionFixture():
+  interface requester(CHIRNIChannels(composition_flit), ~role: icn)
+  interface first(CHISNChannels(composition_flit), ~role: icn)
+  interface second(CHISNChannels(composition_flit), ~role: icn)
+
+  inst home(CHIHNI(home_fixture.home_params))
+  inst requester_router(CHIRouter(requester_router_params))
+  inst requester_transit(CHIRouter(requester_transit_params))
+  inst subordinate_router(CHIRouter(subordinate_router_params))
+  inst subordinate_transit(CHIRouter(subordinate_transit_params))
+  requester_router.site_key <== bits(requester_site_key, requester_router_configs.req.route_decoder.site_width)
+  requester_transit.site_key <== bits(requester_transit_site_key, requester_router_configs.req.route_decoder.site_width)
+  subordinate_router.site_key <== bits(subordinate_site_key, subordinate_router_configs.req.route_decoder.site_width)
+  subordinate_transit.site_key <== bits(subordinate_transit_site_key, subordinate_router_configs.req.route_decoder.site_width)
+  requester <=> requester_router.rni_local[0]
+  home.port.requester <=> requester_router.hni_requester_local[0]
+  home.port.subordinate <=> subordinate_router.hn_subordinate_local[0]
+  first <=> subordinate_router.sn_local[0]
+  second <=> subordinate_router.sn_local[1]
+  connect_chi_router_family(
+    requester_physical,
+    [CHIRouterEndpoints(requester_site_key, requester_router.incoming_links, requester_router.outgoing_links),
+     CHIRouterEndpoints(requester_transit_site_key, requester_transit.incoming_links, requester_transit.outgoing_links)],
+    ~snp: #false
+  )
+  connect_chi_router_family(
+    subordinate_physical,
+    [CHIRouterEndpoints(subordinate_site_key, subordinate_router.incoming_links, subordinate_router.outgoing_links),
+     CHIRouterEndpoints(subordinate_transit_site_key, subordinate_transit.incoming_links, subordinate_transit.outgoing_links)],
+    ~snp: #false
+  )
+
+def split_design = elaborate(CHISplitRouterCompositionFixture())
+
+export:
+  composition_flit
+  shared_compilations
+  shared_rni
+  shared_adapters
+  shared_router_configs
+  shared_attachment
+  shared_router_params
+  shared_design
+  requester_compilations
+  requester_router_configs
+  requester_attachment
+  subordinate_compilations
+  subordinate_router_configs
+  subordinate_attachment
+  split_design

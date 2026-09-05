@@ -95,7 +95,7 @@ integration_fixtures=(
   nested-bundle aggregate-memory one-hot-aggregate priority-encoder
   rv32i-alu rv64i-alu-integrated load-store-rv32-word bit-manip bit-manip-rv32
   credited-flow credited-monitor credited-monitor-overgrant flit-formats
-  aclint uart16550 uart-dpi chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-retryable-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-inclusive-home chi-snp-noc chi-sn-noc chi-family-noc chi-transfer-fragmenter
+  aclint uart16550 uart-dpi chi-foundation chi-full-flits chi-link chi-monitor chi-transaction chi-retryable-transaction chi-transaction-sn chi-coherent chi-ram chi-home chi-coherent-home chi-inclusive-home chi-snp-noc chi-sn-noc chi-family-noc chi-router-composition chi-transfer-fragmenter
   rv5stage-core rv5stage-multiply rv5stage-dcache
 )
 
@@ -339,9 +339,9 @@ run_expected_assertion_failure() {
   local testbench="$3"
   local expected_label="$4"
   local verilog="$test_tmp_dir/$fixture.sv"
-  local object_dir="$test_tmp_dir/${fixture}_failure_obj"
-  local build_log="$test_tmp_dir/$fixture.failure.verilator.log"
-  local run_log="$test_tmp_dir/$fixture.failure.run.log"
+  local object_dir="$test_tmp_dir/${fixture}_${top}_failure_obj"
+  local build_log="$test_tmp_dir/$fixture.$top.failure.verilator.log"
+  local run_log="$test_tmp_dir/$fixture.$top.failure.run.log"
 
   fixture_selected "$fixture" || return 0
   [[ "$simulate_fixtures" == true ]] || return 0
@@ -633,6 +633,7 @@ direct_fixture_specs=(
   'chi-snp-noc|chi_snp_noc_tb'
   'chi-sn-noc|chi_sn_noc_tb'
   'chi-family-noc|chi_family_noc_tb'
+  'chi-router-composition|'
   'chi-transfer-fragmenter|chi_transfer_fragmenter_tb'
   'load-store|load_store_tb'
   'load-store-rv32-word|load_store_rv32_word_tb'
@@ -776,3 +777,9 @@ run_expected_assertion_failure chi-coherent \
 run_expected_assertion_failure chi-ram chi_ram_invalid_tb \
   tests/backend/verilog/chi-ram-invalid_tb.sv \
   chi_ram_request_address_supported
+run_expected_assertion_failure chi-home chi_home_wrong_response_source_tb \
+  tests/backend/verilog/chi-home-wrong-source-tb.sv \
+  chi_hni_transaction_response_transfer_paired
+run_expected_assertion_failure chi-home chi_home_wrong_data_source_tb \
+  tests/backend/verilog/chi-home-wrong-source-tb.sv \
+  chi_hni_transaction_read_data_transfer_paired

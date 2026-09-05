@@ -7,46 +7,9 @@ import:
   lib("cores/rv5stage/interrupt.rhdl").RV5StageInterrupts
   lib("devices/aclint.rhdl").AclintIdentity
   lib("riscv/isa/fp-profile.rhm") open
-  lib("noc/plan/router-family-physical-plan.rhm").RouterFamilyPhysicalPlan
   "tiled-soc-config.rhdl" as configuration
   "tiles/main.rhdl" open
   "host-interface.rhdl".SoCHostInterface
-
-class TiledTileEndpoints(site_key :: Nat,
-                         incoming_links :: Array,
-                         outgoing_links :: Array)
-
-fun require_tiled_tile_endpoints(endpoints :: List.of(TiledTileEndpoints),
-                                 site_key :: Nat) :: TiledTileEndpoints:
-  def found = endpoints.find(fun (candidate): candidate.site_key == site_key)
-  unless found
-  | error(~who: #'connect_tiled_router_family,
-          "missing tile boundary for router-family site")
-  found
-
-// The parent consumes the exact physical-link manifest compiled by the family;
-// tiles remain unaware of their neighbors or the enclosing network hierarchy.
-fun connect_tiled_router_family(family :: RouterFamilyPhysicalPlan,
-                                endpoints :: List.of(TiledTileEndpoints)):
-  unless endpoints.length() == family.members.length()
-  | error(~who: #'connect_tiled_router_family,
-          "router-family wiring requires one tile boundary per family member")
-  for (connection in family.link_connections):
-    def source = require_tiled_tile_endpoints(endpoints, connection.source_site_key)
-    def destination = require_tiled_tile_endpoints(endpoints, connection.destination_site_key)
-    def source_site = family.site(connection.link.source)
-    def destination_site = family.site(connection.link.destination)
-    def source_index = chi_router_link_index(source_site.outgoing_links, connection)
-    def destination_index = chi_router_link_index(destination_site.incoming_links, connection)
-    def source_link :: Endpoint = source.outgoing_links[source_index]
-    def destination_link :: Endpoint = destination.incoming_links[destination_index]
-    source_link <=> destination_link
-  for (endpoint in endpoints):
-    def site = family.sites[endpoint.site_key]
-    for (index in site.incoming_links.length()..endpoint.incoming_links.length()):
-      tie_off_chi_noc_incoming(endpoint.incoming_links[index])
-    for (index in site.outgoing_links.length()..endpoint.outgoing_links.length()):
-      tie_off_chi_noc_outgoing(endpoint.outgoing_links[index])
 
 sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.tiled_soc_config,
                       ~floating_point: profile :: FloatingPointProfile = DefaultFloatingPointProfile):
@@ -117,30 +80,28 @@ sync_circuit TiledSoC(config :: configuration.TiledSoCConfig = configuration.til
 
   def tiles = (
     for List (index in 0..config.rv5stages.length()):
-      TiledTileEndpoints(plan.site_key(config.rv5stages[index].placement.router),
+      CHIRouterEndpoints(plan.site_key(config.rv5stages[index].placement.router),
                          rv5stages[index].incoming_links,
                          rv5stages[index].outgoing_links)
   ) ++ (
     for List (index in 0..config.transits.length()):
-      TiledTileEndpoints(plan.site_key(config.transits[index].placement.router),
+      CHIRouterEndpoints(plan.site_key(config.transits[index].placement.router),
                          transits[index].incoming_links,
                          transits[index].outgoing_links)
   ) ++ [
-    TiledTileEndpoints(plan.site_key(config.host.placement.router),
+    CHIRouterEndpoints(plan.site_key(config.host.placement.router),
                        host_tile.incoming_links,
                        host_tile.outgoing_links),
-    TiledTileEndpoints(plan.site_key(config.aclint.placement.router),
+    CHIRouterEndpoints(plan.site_key(config.aclint.placement.router),
                        aclint.incoming_links,
                        aclint.outgoing_links)
   ] ++ (
     for List (index in 0..config.memories.length()):
-      TiledTileEndpoints(plan.site_key(config.memories[index].placement.router),
+      CHIRouterEndpoints(plan.site_key(config.memories[index].placement.router),
                          memories[index].incoming_links,
                          memories[index].outgoing_links)
   )
-  connect_tiled_router_family(plan.physical_plan, tiles)
+  connect_chi_router_family(plan.physical_plan, tiles)
 
 export:
-  TiledTileEndpoints
-  connect_tiled_router_family
   TiledSoC

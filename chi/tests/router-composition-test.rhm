@@ -1,0 +1,34 @@
+#lang rhombus
+// Checks shared and split no-SNP CHI router compositions and rejects unsupported attachments.
+
+import:
+  "router-composition-fixture.rhdl" as fixture
+  lib("chi/main.rhdl") as chi
+  lib("rhodium/core/main.rhm").verify_design
+
+check:
+  fixture.shared_compilations.snp ~is #false
+  fixture.shared_router_configs.snp ~is #false
+  fixture.shared_router_params.attachment.rni_locals.length() ~is 1
+  fixture.shared_router_params.attachment.hni_requester_locals.length() ~is 1
+  fixture.shared_router_params.attachment.hn_subordinate_locals.length() ~is 1
+  fixture.shared_router_params.attachment.sn_locals.length() ~is 2
+  fixture.shared_design.modules.map(fun (module_def): module_def.name).contains("CHIHNI") ~is #true
+  fixture.shared_design.modules.map(fun (module_def): module_def.name).contains("CHIRouter") ~is #true
+  verify_design(fixture.shared_design) ~is #void
+
+check:
+  fixture.requester_compilations.snp ~is #false
+  fixture.subordinate_compilations.snp ~is #false
+  fixture.requester_compilations.req.network.network_plan === (
+    fixture.subordinate_compilations.req.network.network_plan
+  ) ~is #false
+  fixture.split_design.modules.map(fun (module_def): module_def.name).contains("CHIHNI") ~is #true
+  verify_design(fixture.split_design) ~is #void
+
+check:
+  chi.compile_chi_router_attachment_plan(
+    fixture.shared_router_configs,
+    fixture.shared_adapters,
+    chi.CHIRouterAttachments(~rnf_sites: [[fixture.shared_rni]])
+  ) ~throws "RN-F and HN-F requester attachments require a SNP plane"
