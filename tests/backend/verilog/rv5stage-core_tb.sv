@@ -28,10 +28,17 @@ module rv5stage_core_tb;
     logic [1:0] width;
     logic unsigned_0;
     logic [63:0] data;
-    logic [4:0] tag;
+    logic [1:0] destination;
+    logic [4:0] rd;
+    logic floating_point_double;
   } data_req_bits_t;
   typedef struct packed { logic valid; data_req_bits_t bits; } data_req_t;
-  typedef struct packed { logic [63:0] data; logic [4:0] tag; } data_resp_bits_t;
+  typedef struct packed {
+    logic [63:0] data;
+    logic [1:0] destination;
+    logic [4:0] rd;
+    logic floating_point_double;
+  } data_resp_bits_t;
   typedef struct packed { logic valid; data_resp_bits_t bits; } data_resp_t;
   typedef struct packed { ready_t request; logic request_fault; logic request_access_fault; data_resp_t response; logic drained; } data_in_t;
   typedef struct packed { data_req_t request; } data_out_t;
@@ -56,7 +63,7 @@ module rv5stage_core_tb;
   logic [31:0] instruction_response_bits;
   logic data_response_valid;
   logic [63:0] data_response_bits;
-  logic [4:0] data_response_tag;
+  logic [4:0] data_response_rd;
   logic [1:0] load_requests;
   logic first_response_sent;
   logic [1:0] first_response_delay;
@@ -68,6 +75,8 @@ module rv5stage_core_tb;
   logic saw_fence_i_invalidate;
   logic saw_fence_i_refetch;
   localparam logic [2:0] MEMORY_LOAD = 3'd1;
+  localparam logic [1:0] DATA_DESTINATION_NONE = 2'd0;
+  localparam logic [1:0] DATA_DESTINATION_INTEGER = 2'd1;
 
   RV5StageCore dut (.*);
   always #5 clock = ~clock;
@@ -99,7 +108,9 @@ module rv5stage_core_tb;
     data_access_in.request_access_fault = 1'b0;
     data_access_in.response.valid = data_response_valid;
     data_access_in.response.bits.data = data_response_bits;
-    data_access_in.response.bits.tag = data_response_tag;
+    data_access_in.response.bits.destination = DATA_DESTINATION_INTEGER;
+    data_access_in.response.bits.rd = data_response_rd;
+    data_access_in.response.bits.floating_point_double = 1'b0;
     data_access_in.drained = 1'b1;
   end
 
@@ -109,7 +120,7 @@ module rv5stage_core_tb;
       instruction_response_bits <= '0;
       data_response_valid <= 1'b0;
       data_response_bits <= '0;
-      data_response_tag <= '0;
+      data_response_rd <= '0;
       load_requests <= '0;
       first_response_sent <= 1'b0;
       first_response_delay <= '0;
@@ -147,12 +158,12 @@ module rv5stage_core_tb;
 
       if (data_response_valid) begin
         data_response_valid <= 1'b0;
-        if (data_response_tag == 5'd5) begin
+        if (data_response_rd == 5'd5) begin
           first_response_sent <= 1'b1;
           second_response_delay <= 3'd3;
         end else begin
-          assert (data_response_tag == 5'd8)
-            else $fatal(1, "unexpected completion tag");
+          assert (data_response_rd == 5'd8)
+            else $fatal(1, "unexpected completion destination register");
           second_response_sent <= 1'b1;
         end
       end else if (!data_response_valid) begin
@@ -162,7 +173,7 @@ module rv5stage_core_tb;
           else begin
             data_response_valid <= 1'b1;
             data_response_bits <= 64'd42;
-            data_response_tag <= 5'd5;
+            data_response_rd <= 5'd5;
           end
         end else if (saw_redirect && first_response_sent && !second_response_sent) begin
           if (second_response_delay != 0)
@@ -170,7 +181,7 @@ module rv5stage_core_tb;
           else begin
             data_response_valid <= 1'b1;
             data_response_bits <= 64'd100;
-            data_response_tag <= 5'd8;
+            data_response_rd <= 5'd8;
           end
         end
       end
@@ -179,13 +190,15 @@ module rv5stage_core_tb;
         if (data_access_out.request.bits.access == MEMORY_LOAD) begin
           if (load_requests == 0)
             assert (data_access_out.request.bits.address == 64'd0 &&
-                    data_access_out.request.bits.tag == 5'd5)
-              else $fatal(1, "first load lost its address or destination tag");
+                    data_access_out.request.bits.destination == DATA_DESTINATION_INTEGER &&
+                    data_access_out.request.bits.rd == 5'd5)
+              else $fatal(1, "first load lost its address or destination register");
           else
             assert (load_requests == 1 &&
                     data_access_out.request.bits.address == 64'd16 &&
-                    data_access_out.request.bits.tag == 5'd8)
-              else $fatal(1, "second load lost its address or destination tag");
+                    data_access_out.request.bits.destination == DATA_DESTINATION_INTEGER &&
+                    data_access_out.request.bits.rd == 5'd8)
+              else $fatal(1, "second load lost its address or destination register");
           if (load_requests == 0)
             first_response_delay <= 2'd1;
           load_requests <= load_requests + 1'b1;
@@ -195,14 +208,14 @@ module rv5stage_core_tb;
           if (stores_seen == 0) begin
             assert (data_access_out.request.bits.address == 64'd8 &&
                     data_access_out.request.bits.data == 64'd43 &&
-                    data_access_out.request.bits.tag == 5'd0)
+                    data_access_out.request.bits.destination == DATA_DESTINATION_NONE)
               else $fatal(1, "RAW-dependent result was incorrect");
             stores_seen <= 1;
           end else begin
             assert (stores_seen == 1 &&
                     data_access_out.request.bits.address == 64'd16 &&
                     data_access_out.request.bits.data == 64'd9 &&
-                    data_access_out.request.bits.tag == 5'd0)
+                    data_access_out.request.bits.destination == DATA_DESTINATION_NONE)
               else $fatal(1, "WAW ordering was not preserved");
             assert (saw_fence_i_invalidate && saw_fence_i_refetch)
               else $fatal(1, "FENCE.I did not invalidate and refetch from pc + 4");

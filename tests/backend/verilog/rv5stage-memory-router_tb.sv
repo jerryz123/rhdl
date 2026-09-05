@@ -7,11 +7,18 @@ module rv5stage_memory_router_tb;
     logic [1:0] width;
     logic unsigned_0;
     logic [31:0] data;
-    logic [4:0] tag;
+    logic [1:0] destination;
+    logic [4:0] rd;
+    logic floating_point_double;
   } request_bits_t;
   typedef struct packed { logic valid; request_bits_t bits; } request_t;
   typedef struct packed { logic ready; } ready_t;
-  typedef struct packed { logic [31:0] data; logic [4:0] tag; } response_bits_t;
+  typedef struct packed {
+    logic [31:0] data;
+    logic [1:0] destination;
+    logic [4:0] rd;
+    logic floating_point_double;
+  } response_bits_t;
   typedef struct packed { logic valid; response_bits_t bits; } response_t;
   typedef struct packed { request_t request; } requester_t;
   typedef struct packed {

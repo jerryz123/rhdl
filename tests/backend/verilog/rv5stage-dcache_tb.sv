@@ -7,11 +7,18 @@ module rv5stage_dcache_tb;
     logic [1:0] width;
     logic unsigned_load;
     logic [63:0] data;
-    logic [4:0] tag;
+    logic [1:0] destination;
+    logic [4:0] rd;
+    logic floating_point_double;
   } core_req_bits_t;
   typedef struct packed { logic valid; core_req_bits_t bits; } core_req_t;
   typedef struct packed { logic ready; } ready_t;
-  typedef struct packed { logic [63:0] data; logic [4:0] tag; } core_resp_bits_t;
+  typedef struct packed {
+    logic [63:0] data;
+    logic [1:0] destination;
+    logic [4:0] rd;
+    logic floating_point_double;
+  } core_resp_bits_t;
   typedef struct packed { logic valid; core_resp_bits_t bits; } core_resp_t;
   typedef struct packed { core_req_t request; } core_in_t;
   typedef struct packed { ready_t request; logic request_fault; logic request_access_fault; core_resp_t response; logic drained; } core_out_t;
@@ -59,6 +66,8 @@ module rv5stage_dcache_tb;
   localparam logic [2:0] MEMORY_ATOMIC = 3'd5;
   localparam logic [3:0] ATOMIC_SWAP = 4'd0;
   localparam logic [3:0] ATOMIC_ADD = 4'd1;
+  localparam logic [1:0] DATA_DESTINATION_NONE = 2'd0;
+  localparam logic [1:0] DATA_DESTINATION_INTEGER = 2'd1;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -145,7 +154,7 @@ module rv5stage_dcache_tb;
     input logic [2:0] access,
     input logic [3:0] atomic,
     input logic [63:0] data,
-    input logic [4:0] tag
+    input logic [4:0] rd
   );
     integer cycles;
     begin
@@ -162,7 +171,9 @@ module rv5stage_dcache_tb;
                                width: 2'd3,
                                unsigned_load: 1'b0,
                                data: data,
-                               tag: tag};
+                               destination: access == MEMORY_STORE ? DATA_DESTINATION_NONE : DATA_DESTINATION_INTEGER,
+                               rd: rd,
+                               floating_point_double: 1'b0};
       core_in.request.valid = 1'b1;
       tick();
       core_in.request.valid = 1'b0;
@@ -250,7 +261,8 @@ module rv5stage_dcache_tb;
   endtask
 
   task automatic expect_core_response(input logic [63:0] data,
-                                      input logic [4:0] tag);
+                                      input logic [1:0] destination,
+                                      input logic [4:0] rd);
     integer cycles;
     begin
       cycles = 0;
@@ -260,14 +272,18 @@ module rv5stage_dcache_tb;
       end
       assert (core_out.response.valid &&
               core_out.response.bits.data == data &&
-              core_out.response.bits.tag == tag)
+              core_out.response.bits.destination == destination &&
+              core_out.response.bits.rd == rd &&
+              !core_out.response.bits.floating_point_double)
         else $fatal(1,
-                    "L1D response mismatch: valid=%0d data=%h expected=%h tag=%0d expected_tag=%0d",
+                    "L1D response mismatch: valid=%0d data=%h expected=%h destination=%0d expected_destination=%0d rd=%0d expected_rd=%0d",
                     core_out.response.valid,
                     core_out.response.bits.data,
                     data,
-                    core_out.response.bits.tag,
-                    tag);
+                    core_out.response.bits.destination,
+                    destination,
+                    core_out.response.bits.rd,
+                    rd);
       tick();
     end
   endtask
@@ -431,10 +447,10 @@ module rv5stage_dcache_tb;
     accept_request(READ_CLEAN, ADDRESS, 12'd0, 6'd6, 1'b0, 4'd6);
     return_line(ADDRESS, LINE, 3'b001);
     accept_comp_ack();
-    expect_core_response(64'h88776655_44332211, 5'd3);
+    expect_core_response(64'h88776655_44332211, DATA_DESTINATION_INTEGER, 5'd3);
 
     send_core_request(ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd4);
-    expect_core_response(64'h88776655_44332211, 5'd4);
+    expect_core_response(64'h88776655_44332211, DATA_DESTINATION_INTEGER, 5'd4);
 
     // An AMO to a shared line acquires Unique ownership, returns the old
     // doubleword, installs the updated value, and leaves the line dirty.
@@ -445,18 +461,18 @@ module rv5stage_dcache_tb;
     accept_request(READ_UNIQUE, ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
     return_line(ADDRESS, LINE, 3'b010);
     accept_comp_ack();
-    expect_core_response(64'hffeeddcc_bbaa9988, 5'd7);
+    expect_core_response(64'hffeeddcc_bbaa9988, DATA_DESTINATION_INTEGER, 5'd7);
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after ownership acquisition");
     assert (!tx_dat_pending)
       else $fatal(1, "write-allocate AMO unexpectedly emitted write data");
 
     send_core_request(ADDRESS + 64'h18, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd6);
-    expect_core_response(64'hffeeddcc_bbaa9989, 5'd6);
+    expect_core_response(64'hffeeddcc_bbaa9989, DATA_DESTINATION_INTEGER, 5'd6);
 
     // A second store hits UniqueDirty and remains entirely local.
     send_core_request(ADDRESS + 64'h28, MEMORY_STORE, ATOMIC_SWAP, STORE_DATA_2, 5'd0);
-    expect_core_response(64'd0, 5'd0);
+    expect_core_response(64'd0, DATA_DESTINATION_NONE, 5'd0);
     tick();
     assert (!tx_req_pending && !tx_dat_pending)
       else $fatal(1, "UniqueDirty store unexpectedly reached CHI");
@@ -466,16 +482,16 @@ module rv5stage_dcache_tb;
     // LR observes the dirty line. Its matching SC succeeds once, returns zero,
     // and a second SC fails without issuing any coherence traffic.
     send_core_request(ADDRESS + 64'h28, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd8);
-    expect_core_response(STORE_DATA_2, 5'd8);
+    expect_core_response(STORE_DATA_2, DATA_DESTINATION_INTEGER, 5'd8);
     send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA, 5'd9);
-    expect_core_response(64'd0, 5'd9);
+    expect_core_response(64'd0, DATA_DESTINATION_INTEGER, 5'd9);
     send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd10);
-    expect_core_response(64'd1, 5'd10);
+    expect_core_response(64'd1, DATA_DESTINATION_INTEGER, 5'd10);
     tick();
     assert (!tx_req_pending && !tx_dat_pending)
       else $fatal(1, "failed SC unexpectedly reached CHI");
     send_core_request(ADDRESS + 64'h28, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd11);
-    expect_core_response(STORE_DATA, 5'd11);
+    expect_core_response(STORE_DATA, DATA_DESTINATION_INTEGER, 5'd11);
 
     // A second colliding line occupies the invalid way without evicting the
     // dirty first line. A third collision then selects that round-robin victim
@@ -484,7 +500,7 @@ module rv5stage_dcache_tb;
     dirty_line[3 * 64 +: 64] = 64'hffeeddcc_bbaa9989;
     dirty_line[5 * 64 +: 64] = STORE_DATA;
     send_core_request(ADDRESS + 64'h28, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd14);
-    expect_core_response(STORE_DATA, 5'd14);
+    expect_core_response(STORE_DATA, DATA_DESTINATION_INTEGER, 5'd14);
     grant_req_credit();
     grant_rsp_credit();
     grant_dat_credit();
@@ -492,12 +508,12 @@ module rv5stage_dcache_tb;
     accept_request(READ_CLEAN, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
     return_line(EVICT_ADDRESS, EVICT_LINE, 3'b001);
     accept_comp_ack();
-    expect_core_response(64'h37363534_33323130, 5'd5);
+    expect_core_response(64'h37363534_33323130, DATA_DESTINATION_INTEGER, 5'd5);
     // Filling an invalid colliding way does not replace the reserved line.
     send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA, 5'd16);
-    expect_core_response(64'd0, 5'd16);
+    expect_core_response(64'd0, DATA_DESTINATION_INTEGER, 5'd16);
     send_core_request(ADDRESS + 64'h28, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd19);
-    expect_core_response(STORE_DATA, 5'd19);
+    expect_core_response(STORE_DATA, DATA_DESTINATION_INTEGER, 5'd19);
     send_core_request(THIRD_ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd17);
     for (beat = 0; beat < 8; beat = beat + 1) begin
       accept_request(WRITE_UNIQUE_PTL,
@@ -514,9 +530,9 @@ module rv5stage_dcache_tb;
     accept_request(READ_CLEAN, THIRD_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
     return_line(THIRD_ADDRESS, THIRD_LINE, 3'b001);
     accept_comp_ack();
-    expect_core_response(64'habcdef01_23456789, 5'd17);
+    expect_core_response(64'habcdef01_23456789, DATA_DESTINATION_INTEGER, 5'd17);
     send_core_request(ADDRESS + 64'h28, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd15);
-    expect_core_response(64'd1, 5'd15);
+    expect_core_response(64'd1, DATA_DESTINATION_INTEGER, 5'd15);
 
     // Dirty snoop intervention returns the complete authoritative line and
     // invalidates the local copy without issuing a control-only SnpResp.
@@ -524,9 +540,9 @@ module rv5stage_dcache_tb;
     accept_request(READ_UNIQUE, EVICT_ADDRESS, 12'd0, 6'd6, 1'b1, 4'd0);
     return_line(EVICT_ADDRESS, EVICT_LINE, 3'b010);
     accept_comp_ack();
-    expect_core_response(64'd0, 5'd0);
+    expect_core_response(64'd0, DATA_DESTINATION_NONE, 5'd0);
     send_core_request(EVICT_ADDRESS + 64'h8, MEMORY_LR, ATOMIC_SWAP, 64'd0, 5'd12);
-    expect_core_response(STORE_DATA, 5'd12);
+    expect_core_response(STORE_DATA, DATA_DESTINATION_INTEGER, 5'd12);
     evict_dirty_line = EVICT_LINE;
     evict_dirty_line[1 * 64 +: 64] = STORE_DATA;
     chi_in.request_data.ready = 1'b0;
@@ -535,14 +551,14 @@ module rv5stage_dcache_tb;
       accept_snoop_data(beat, evict_dirty_line, 12'h077);
     tick();
     send_core_request(EVICT_ADDRESS + 64'h8, MEMORY_SC, ATOMIC_SWAP, STORE_DATA_2, 5'd13);
-    expect_core_response(64'd1, 5'd13);
+    expect_core_response(64'd1, DATA_DESTINATION_INTEGER, 5'd13);
     tick();
     assert (!tx_req_pending && !tx_dat_pending)
       else $fatal(1, "snoop-invalidated SC unexpectedly reached CHI");
     assert (core_out.drained)
       else $fatal(1, "data cache did not drain after dirty snoop response");
     send_core_request(THIRD_ADDRESS, MEMORY_LOAD, ATOMIC_SWAP, 64'd0, 5'd18);
-    expect_core_response(64'habcdef01_23456789, 5'd18);
+    expect_core_response(64'habcdef01_23456789, DATA_DESTINATION_INTEGER, 5'd18);
 
     $display("RV5Stage write-back data-cache simulation passed");
     $finish;
