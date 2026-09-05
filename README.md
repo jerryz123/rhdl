@@ -1,63 +1,21 @@
-<!-- Introduces Rhodium, provides a first circuit, and routes readers to component-owned documentation. -->
+<!-- Introduces Rhodium, explains its authoring and elaboration model, and routes readers to component-owned documentation. -->
 
 # Rhodium
 
 > Yes, all the code here was written by a LLM. The only text not produced by a LLM is this disclaimer. I worked with a coding agent to implement everything here to my personal preferences.
 
-Rhodium is an experimental Rhombus-hosted hardware description language. Ordinary
-Rhombus computation elaborates and verifies a public hardware IR. Optional
-consumers can inspect that IR or lower it through CIRCT to SystemVerilog.
+Rhodium is an experimental hardware description language hosted by
+[Rhombus](https://docs.racket-lang.org/rhombus/). Ordinary Rhombus computation
+generates hardware through concise, typed notation; elaboration produces one
+public, backend-independent hardware IR and verifies it before any downstream
+tool consumes it.
 
-The project explores language-oriented programming for hardware design: a
-small semantic core supports progressively richer languages and libraries.
-The same circuit can be written explicitly against the IR, through a
-construction kernel, through selected language layers, or with concise
-standard syntax without creating competing hardware semantics.
+Normal designs use `#lang rhodium`. Authors who want to assemble a smaller
+language can start from `#lang rhodium/base` and import only the frontend layers
+they need. Both profiles create exactly the same core hardware model.
 
-Rhodium does not emit SystemVerilog itself. CIRCT owns RTL generation.
-
-Dependency-neutral Rhombus refinements shared by the pure model and hardware
-packages live under [`support/`](support/README.md).
-
-RFPL is the physical-annotation language above Rhodium. It classifies existing
-Rhodium circuits as opaque hard macros or wiring-only composite floorplans, adds
-exact rectangular dimensions and child-instance coordinates, and leaves the
-logical IR and generated RTL unchanged. See the
-[RFPL guide](rfpl/README.md).
-
-## Architecture
-
-```text
-#lang rhodium ------> standard ------> foundation + curated layers
-#lang rhodium/base ------------------> foundation + selected layers
-                                             |
-                                             v
-                                    elaboration kernel
-                                             |
-                                             v
-                                       public core IR
-                                      /       |       \
-                                     v        v        v
-                           inspection tools  formal  optional CIRCT backend
-                                             engine          |
-                                                             v
-                                                       SystemVerilog
-```
-
-Macro expansion is not a second hardware IR. A concept belongs in core only
-when it introduces hardware meaning that verification and backends must
-preserve. Notation, organization, and policy over existing semantics belong in
-frontend layers or ordinary libraries.
-
-The authoritative package graph and dependency contract are in
-[`rhodium/README.md`](rhodium/README.md).
-
-> **Design perspectives:** the
-> [Rhodium comparison guide](docs/comparisons/README.md) contrasts Rhodium with
-> construction languages, rule-based and functional HDLs, timing-typed
-> research languages, compiler IRs, multi-level modeling systems, and
-> SystemVerilog. It focuses on core semantics, abstraction expressivity,
-> syntactic clarity, and compositionality.
+Rhodium does not emit SystemVerilog itself. Its optional backend lowers verified
+IR through CIRCT, which owns RTL generation.
 
 ## Quick start
 
@@ -82,8 +40,8 @@ the ignored `.tools` directory:
 make setup-circt
 ```
 
-On other platforms, install CIRCT separately and set `CIRCT_OPT` to the path
-of `circt-opt` when running backend integration tests.
+On other platforms, install CIRCT separately and set `CIRCT_OPT` to the path of
+`circt-opt` when running backend integration tests.
 
 ### First circuit
 
@@ -118,70 +76,159 @@ make test
 Use the focused commands in [`tests/README.md`](tests/README.md) while
 developing.
 
-## Documentation
+## Mental model
 
-Detailed documentation lives with the component that owns it:
+A Rhodium source file contains two kinds of computation:
 
-| Topic | Document |
-|---|---|
-| Shared dependency-neutral Rhombus refinements | [`support/README.md`](support/README.md) |
-| Package graph and dependency rules | [`rhodium/README.md`](rhodium/README.md) |
-| RFPL physical-view language and validation | [`rfpl/README.md`](rfpl/README.md) |
-| Language and compiler design comparisons | [`docs/comparisons/README.md`](docs/comparisons/README.md) |
-| Core semantics, IR, Builder, and verification | [`rhodium/core/README.md`](rhodium/core/README.md) |
-| Clock/reset inventory and temporal provenance analysis | [`rhodium/analysis/README.md`](rhodium/analysis/README.md) |
-| Logical block, hierarchy, interface, and flow diagrams | [`rhodium/diagram/README.md`](rhodium/diagram/README.md) |
-| Elaboration, profiles, and extension boundaries | [`rhodium/frontend/README.md`](rhodium/frontend/README.md) |
-| Frontend feature and syntax guide | [`rhodium/frontend/layers/README.md`](rhodium/frontend/layers/README.md) |
-| Host utilities, protocols, and reusable circuit generators | [`rhodium/std/README.md`](rhodium/std/README.md) |
-| Pure NoC authoring, validation, planning, and hardware bridge | [`noc/README.md`](noc/README.md) |
-| Rhodium port of Berkeley HardFloat recoded floating-point hardware | [`hardfloat/README.md`](hardfloat/README.md) |
-| AMBA CHI parameters, exact flits, credited node links, and link-local monitors | [`chi/README.md`](chi/README.md) |
-| CHI platform devices and register blocks | [`devices/README.md`](devices/README.md) |
-| CIRCT lowering and SystemVerilog generation | [`rhodium/backend/README.md`](rhodium/backend/README.md) |
-| Rosette equivalence, counterexamples, reachability, and output properties | [`rhodium/formal/README.md`](rhodium/formal/README.md) |
-| Language-oriented walkthrough and examples | [`examples/README.md`](examples/README.md) |
-| Test organization and focused commands | [`tests/README.md`](tests/README.md) |
-| Project-aware Emacs integration | [`tools/emacs/README.md`](tools/emacs/README.md) |
-| CIRCT fixtures, simulation, and Verilog goldens | [`tests/backend/README.md`](tests/backend/README.md) |
-| Executable SoC simulation harnesses | [`sims/README.md`](sims/README.md) |
-| Technology-independent SRAM mapping and adapters | [`sram/README.md`](sram/README.md) |
-| OpenFrame physical flow and mapped VLSI simulation | [`vlsi/README.md`](vlsi/README.md) |
-| RISC-V instruction model, integer-extension catalogs, and Rhodium adapter | [`riscv/README.md`](riscv/README.md) |
-| Reusable processor components and named cores | [`cores/README.md`](cores/README.md) |
-| Hardware SoC composition | [`socs/README.md`](socs/README.md) |
+- **Host computation** is ordinary Rhombus. Host values, functions, loops, and
+  conditionals decide what hardware is generated during elaboration.
+- **Hardware computation** describes runtime signals, state, memories, and
+  hierarchy. Hardware values have explicit types and cannot control ordinary
+  host conditionals.
+
+Calling `elaborate` runs the host program, constructs the selected hardware,
+and verifies the completed design. Macro expansion and frontend layers do not
+create intermediate hardware languages: every authoring path converges on the
+same public core IR.
+
+### Authoring profiles
+
+| Profile | Intended use | Provides |
+|---|---|---|
+| `#lang rhodium` | Normal design work | Rhombus, the foundational circuit surface, and the curated frontend layers |
+| `#lang rhodium/base` | Language composition and focused extensions | Rhombus and the foundation; the program explicitly imports any additional layers |
+
+The foundation supplies circuits, ports, connections, elaboration, and basic
+hardware types. Selectable layers add notation, types, static information, and
+authoring policy. Ordinary standard and domain libraries build on the public
+language; they are not compiler layers.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    standard["#lang rhodium<br/>foundation + curated layers"]
+    base["#lang rhodium/base<br/>foundation + explicit layer imports"]
+    libraries["Standard and domain libraries<br/>ordinary public Rhodium code"]
+    frontend["Frontend notation, types,<br/>static information, and policy"]
+    kernel["Elaboration kernel<br/>context-sensitive construction"]
+    core["Verified public core IR<br/>types, values, places, operations, and resources"]
+    analysis["Analysis and diagrams"]
+    formal["Formal engine"]
+    circt["Optional CIRCT backend"]
+    sv["SystemVerilog"]
+
+    standard --> frontend
+    base --> frontend
+    libraries --> frontend
+    frontend --> kernel
+    kernel --> core
+    core --> analysis
+    core --> formal
+    core --> circt
+    circt --> sv
+```
+
+The architectural boundary is semantic rather than syntactic. A concept belongs
+in core only when verification and every backend must preserve its hardware
+meaning. Notation, organization, reusable host descriptions, and policy over
+existing operations belong in frontend layers or ordinary libraries. Optional
+derived facts and reports belong in analysis packages.
+
+The authoritative package graph, direct dependency inventory, and enforced
+boundary rules are in [`rhodium/README.md`](rhodium/README.md).
+
+## Design commitments
+
+- One public, inspectable hardware IR rather than frontend-specific IRs.
+- Explicit widths and conversions, fixed-width arithmetic, and deterministic
+  host elaboration.
+- Readable values and driveable places with exactly one effective driver.
+- Frontend-defined types and notation that reuse core semantics whenever
+  possible.
+- Backends consume verified IR and never import frontend syntax.
+- CIRCT owns SystemVerilog generation.
+
+The [Rhodium comparison guide](docs/comparisons/README.md) places these choices
+alongside construction languages, rule-based and functional HDLs, timing-typed
+research languages, compiler IRs, multi-level modeling systems, and
+SystemVerilog.
+
+## Explore the project
+
+### Learn the language
+
+- [`examples/README.md`](examples/README.md) — executable language walkthrough
+  and example catalog
+- [`rhodium/frontend/README.md`](rhodium/frontend/README.md) — elaboration,
+  profiles, and extension boundaries
+- [`rhodium/frontend/layers/README.md`](rhodium/frontend/layers/README.md) —
+  frontend feature and syntax guide
+- [`rhodium/std/README.md`](rhodium/std/README.md) — host utilities, protocols,
+  and reusable circuit generators
+
+### Understand the implementation
+
+- [`rhodium/README.md`](rhodium/README.md) — package graph and dependency rules
+- [`rhodium/core/README.md`](rhodium/core/README.md) — semantic types, IR,
+  Builder, and verification
+- [`rhodium/analysis/README.md`](rhodium/analysis/README.md) — clock/reset
+  inventory and temporal provenance
+- [`rhodium/diagram/README.md`](rhodium/diagram/README.md) — logical hierarchy,
+  interface, and flow diagrams
+- [`rhodium/backend/README.md`](rhodium/backend/README.md) — CIRCT lowering and
+  SystemVerilog generation
+- [`rhodium/formal/README.md`](rhodium/formal/README.md) — Rosette equivalence,
+  reachability, and output properties
+- [`tests/README.md`](tests/README.md) and
+  [`tests/backend/README.md`](tests/backend/README.md) — focused tests, external
+  simulation, and Verilog goldens
+
+### Explore hardware libraries and systems
+
+- [`noc/README.md`](noc/README.md) — graph-validated NoC authoring and hardware
+  bridge
+- [`riscv/README.md`](riscv/README.md) — RISC-V instruction model and Rhodium
+  adapter
+- [`hardfloat/README.md`](hardfloat/README.md) — Berkeley HardFloat port
+- [`chi/README.md`](chi/README.md) and [`devices/README.md`](devices/README.md) —
+  AMBA CHI and platform devices
+- [`cores/README.md`](cores/README.md) and [`socs/README.md`](socs/README.md) —
+  reusable processors and SoC composition
+- [`sims/README.md`](sims/README.md) — executable SoC simulation harnesses
+
+### Physical and development tooling
+
+- [`rfpl/README.md`](rfpl/README.md) — physical views over existing Rhodium
+  circuits
+- [`sram/README.md`](sram/README.md) — technology-independent SRAM mapping
+- [`vlsi/README.md`](vlsi/README.md) — physical integration and mapped simulation
+- [`support/README.md`](support/README.md) — dependency-neutral Rhombus
+  refinements
+- [`tools/emacs/README.md`](tools/emacs/README.md) — project-aware Emacs
+  integration
 
 ## Current status
 
 The current vertical slice includes:
 
-- An RFPL physical-annotation language whose hard macros may contain arbitrary
-  Rhodium logic and whose composite floorplans classify existing wiring-only
-  circuits, with exact dimensions and contained child-instance coordinates.
-- A public, inspectable, backend-independent IR with explicit-width types,
-  structural aggregates, primitive state and memories, clocked assertions, DPI
-  simulation operations, single-driver verification, and combinational-cycle
-  detection.
-- A read-only logical diagram view with hierarchical blocks, compound interface
-  channels, flow-aware stages, deterministic JSON, and compact Graphviz DOT.
-- Standard and compositional Rhombus profiles with host-only generation,
-  frontend-defined types including explicit-width signed integers, typed
-  literals and patterns, relational decode generation, combinational and
-  sequential constructs, hierarchy, directional interfaces, and reusable
-  protocol libraries.
-- Deterministic CIRCT lowering with example-owned SystemVerilog references and
+- A public, backend-independent IR with explicit-width types, structural
+  aggregates, state, memories, assertions, DPI simulation operations,
+  single-driver verification, and combinational-cycle detection.
+- Standard and compositional profiles with host-only generation,
+  frontend-defined scalar and aggregate types, combinational and sequential
+  constructs, hierarchy, directional interfaces, and reusable protocols.
+- Deterministic CIRCT lowering, example-owned SystemVerilog references, and
   Verilator simulations.
-- Optional Rosette-backed deterministic combinational equivalence, output
-  reachability, and universal output properties with typed counterexamples and
-  witnesses over verified public IR.
-- Backend-independent clock/reset inventory and hierarchy-aware temporal
-  provenance reports that distinguish same-clock, foreign-clock, external,
-  static, and multi-clock fan-in sources.
-- RV5Stage, a five-stage RV32/RV64 core with component-oriented decode, A, B, M,
-  Zicond, Zicsr, Zicntr, privilege and trap state, private coherent L1 caches, and separate
-  CHI RN-F ports for SoC integration. Its exact current pipeline, cache, and
-  integration contracts are documented in
-  [`cores/rv5stage/README.md`](cores/rv5stage/README.md).
+- Optional Rosette-backed equivalence, reachability, and universal output
+  properties over verified IR.
+- Backend-independent clock/reset inventory, temporal-provenance reports, and
+  durable crossing evidence.
+- Logical diagrams plus RFPL physical annotations that leave logical IR and
+  generated RTL unchanged.
+- RV5Stage, a five-stage RV32/RV64 processor with floating point, privilege and
+  trap state, private coherent L1 caches, and CHI integration. See
+  [`cores/rv5stage/README.md`](cores/rv5stage/README.md) for its current contract.
 
 ## Deferred work
 
