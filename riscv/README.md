@@ -146,6 +146,7 @@ the pure descriptor and hardware materialization path.
 | [`isa/d.rhm`](isa/d.rhm) | `RV32D`, `RV64D` | D-specific 2.2 instruction encodings, composed with F by a D-profile consumer |
 | [`isa/zfhmin.rhm`](isa/zfhmin.rhm) | `RV32Zfhmin`, `RV64Zfhmin` plus D-dependent catalogs | Zfhmin 1.0 move, load/store, and widening/narrowing conversions |
 | [`isa/zfh.rhm`](isa/zfh.rhm) | `RV32Zfh`, `RV64Zfh` plus D-dependent catalogs | Full Zfh 1.0 binary16 arithmetic, fused, comparison, classification, and conversion operations |
+| [`isa/zfa.rhm`](isa/zfa.rhm) | `ZfaF`, `ZfaD`, `ZfaH`, and `RV32ZfaDMove` | Zfa 1.0 immediate, IEEE min/max, integral-rounding, quiet-comparison, modulo-conversion, and RV32D pair-move encodings |
 
 The profiles are host data so unsupported hardware specializes away rather than
 becoming runtime control. The half-precision profile leaves FLEN under the base
@@ -240,3 +241,5 @@ and C follows the ratified
 [compressed-instruction extension](https://docs.riscv.org/reference/isa/unpriv/c-st-ext.html).
 Zfhmin and Zfh follow the ratified
 [half-precision floating-point extension](https://github.com/riscv/riscv-isa-manual/blob/main/src/unpriv/zfh.adoc).
+Zfa follows the ratified
+[additional floating-point extension](https://docs.riscv.org/reference/isa/unpriv/zfa.html).

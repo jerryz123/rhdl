@@ -46,7 +46,7 @@ integration boundaries.
 | [`interrupt.rhdl`](interrupt.rhdl) | `interrupt_cause_bits` | Convert architectural interrupt causes to `xcause` values |
 | [`pma.rhdl`](pma.rhdl) | `RiscvPhysicalMemoryAttributes`, `RiscvPhysicalMemoryRegion`, `RiscvPhysicalMemoryMap`, `RiscvPhysicalMemoryLookup` | Validate host-authored regions and perform hardware access lookup |
 | [`sv39.rhdl`](sv39.rhdl) | `Sv39Access`, `Sv39Pte`, `Sv39Translation`, and `sv39_*` helpers | Materialize the pure Sv39 geometry as typed hardware |
-| [`floating-point.rhdl`](floating-point.rhdl) | `FloatSignOperation`, `RiscvRoundingMode`, `RiscvFloatMinMax`, and `riscv_*` helpers | Apply RISC-V policy around HardFloat values |
+| [`floating-point.rhdl`](floating-point.rhdl) | `FloatSignOperation`, `RiscvRoundingMode`, Zfa immediate constants, and `riscv_*` helpers | Apply RISC-V policy around HardFloat values |
 
 ## Decode descriptors
 

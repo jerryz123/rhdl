@@ -1,4 +1,4 @@
-// Verifies RISC-V NaN, rounding, move, classification, flag, and min/max policy.
+// Verifies reusable RISC-V NaN, rounding, move, classification, and flag policy.
 module riscv_floating_point_tb;
   logic [31:0] value;
   logic [31:0] other;
@@ -7,7 +7,6 @@ module riscv_floating_point_tb;
   logic [2:0] instruction_mode;
   logic [2:0] dynamic_mode;
   logic [1:0] sign_operation;
-  logic maximum;
   logic invalid;
   logic infinite;
   logic overflow;
@@ -26,8 +25,6 @@ module riscv_floating_point_tb;
   logic [63:0] integer_move;
   logic [31:0] float_move;
   logic [9:0] classification;
-  logic [31:0] minmax_result;
-  logic [4:0] minmax_flags;
 
   RiscvFloatingPointFixture dut (.*);
 
@@ -39,7 +36,6 @@ module riscv_floating_point_tb;
     instruction_mode = 3'd7;
     dynamic_mode = 3'd3;
     sign_operation = 2'd0;
-    maximum = 1'b0;
     invalid = 1'b1;
     infinite = 1'b1;
     overflow = 1'b1;
@@ -53,29 +49,17 @@ module riscv_floating_point_tb;
     assert (sign_result == 32'hbf800000);
     assert (integer_move == 64'h000000003f800000 && float_move == 32'h89abcdef);
     assert (classification == 10'b0001000000);
-    assert (minmax_result == 32'hc0000000 && minmax_flags == 0);
 
     container = 64'h000000003f800000;
     instruction_mode = 3'd7;
     dynamic_mode = 3'd5;
     value = 32'h7fa00001;
     other = 32'h40000000;
-    maximum = 1'b1;
     #1;
     assert (!box_valid && unboxed == 32'h7fc00000);
     assert (canonicalized == 32'h7fc00000);
     assert (!rounding_valid);
     assert (classification == 10'b0100000000);
-    assert (minmax_result == 32'h40000000 && minmax_flags == 5'b10000);
-
-    value = 32'h80000000;
-    other = 32'h00000000;
-    maximum = 1'b0;
-    #1;
-    assert (minmax_result == 32'h80000000);
-    maximum = 1'b1;
-    #1;
-    assert (minmax_result == 32'h00000000);
 
     $display("RISC-V floating-point helpers passed");
     $finish;

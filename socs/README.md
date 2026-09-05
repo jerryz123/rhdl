@@ -24,13 +24,13 @@ instead of treating this page as a component catalog.
 All three systems expose the same [`SoCHostInterface`](host-interface.rhdl): a
 non-caching coherent RN-F memory port for loading and observation, plus a
 64-bit boot-entry channel. `SimpleSoC` and `TiledSoC` accept an explicit
-`~floating_point:` specialization and an orthogonal `~half_precision:`
-specialization; the reusable `SimpleSoCFabric` also accepts both. `MiniSoC`
+`~floating_point:` specialization and orthogonal `~half_precision:` and `~zfa:`
+specializations; the reusable `SimpleSoCFabric` also accepts all three. `MiniSoC`
 currently inherits that fabric's integer-only, non-compressed defaults.
 `TiledSoC` keeps the integer-only floating-point default while enabling
 compressed instructions, and `SimpleSoC` defaults to `FloatingPointProfile.D`
-with compressed instructions enabled. Half precision defaults to disabled in
-both compositions.
+with compressed instructions enabled. Half precision and Zfa default to disabled
+in both compositions.
 
 Every system also exposes the shared [`SoCUartInterface`](peripherals.rhdl)
 containing RX, TX, and interrupt signals.

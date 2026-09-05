@@ -39,7 +39,76 @@ fun fp_integer_word_result(xlen :: XLen,
   | value
   | value.into(SInt(32)).sext(64).as_bits()
 
-circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, format :: FloatFormat, Context :: DataType):
+circuit RV5StageDisabledZfaFormatDatapath(format :: FloatFormat):
+  input value: RecFloat(format)
+  input rounding_mode: RoundingMode
+  input raise_inexact: Bool
+  input immediate_index: Bits(5)
+  output immediate: IEEEFloat(format)
+  output rounded: RecFloat(format)
+  output round_exception_flags: Bits(5)
+  output modulo: Bits(32)
+  output modulo_exception_flags: Bits(5)
+
+  immediate <== dont_care(IEEEFloat(format))
+  rounded <== dont_care(RecFloat(format))
+  round_exception_flags <== bits(0, 5)
+  modulo <== bits(0, 32)
+  modulo_exception_flags <== bits(0, 5)
+
+circuit RV5StageDisabledZfaModulo(format :: FloatFormat):
+  input value: RecFloat(format)
+  output result: Bits(32)
+  output exception_flags: Bits(5)
+
+  result <== bits(0, 32)
+  exception_flags <== bits(0, 5)
+
+circuit RV5StageZfaModulo(format :: FloatFormat):
+  input value: RecFloat(format)
+  output result: Bits(32)
+  output exception_flags: Bits(5)
+
+  inst convert(RecFNToIntegerModulo(format, 32))
+  convert.value <== value
+  convert.rounding_mode <== RoundingMode.MinMagnitude
+  convert.signed_output <== Bool(#true)
+  result <== convert.out
+  exception_flags <== riscv_integer_exception_flags(convert.exception_flags)
+
+circuit RV5StageZfaFormatDatapath(format :: FloatFormat,
+                                  ~modulo: modulo_enabled :: Boolean = #false):
+  input value: RecFloat(format)
+  input rounding_mode: RoundingMode
+  input raise_inexact: Bool
+  input immediate_index: Bits(5)
+  output immediate: IEEEFloat(format)
+  output rounded: RecFloat(format)
+  output round_exception_flags: Bits(5)
+  output modulo: Bits(32)
+  output modulo_exception_flags: Bits(5)
+
+  inst round(RoundToIntegralRecFN(format))
+  round.value <== value
+  round.rounding_mode <== rounding_mode
+  round.raise_inexact <== raise_inexact
+  def ModuloModule = if modulo_enabled | RV5StageZfaModulo(format) | RV5StageDisabledZfaModulo(format)
+  inst modulo_convert(ModuloModule)
+  modulo_convert.value <== value
+  immediate <== riscv_float_immediate(format, immediate_index)
+  rounded <== round.out
+  round_exception_flags <== riscv_exception_flags(round.exception_flags)
+  modulo <== modulo_convert.result
+  modulo_exception_flags <== modulo_convert.exception_flags
+
+circuit RV5StageFpFormatDatapath(
+  xlen :: XLen,
+  profile :: FloatingPointProfile,
+  format :: FloatFormat,
+  Context :: DataType,
+  ~zfa: zfa_enabled :: Boolean = #false,
+  ~zfa_modulo: zfa_modulo_enabled :: Boolean = #false
+):
   def width = xlen.width
   def flen = floating_point_register_width(profile)
   unless flen >= format.ieee_width
@@ -81,7 +150,7 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
   inst compare(CompareRecFN(format))
   compare.a <== left_recoded
   compare.b <== right_recoded
-  compare.signaling <== control.comparison =/= RV5StageFloatComparison.Equal
+  compare.signaling <== control.comparison_signaling
   def comparison_value = mux_lookup(
     control.comparison,
     ~default: compare.eq,
@@ -91,10 +160,17 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
     ]
   )
 
-  inst minmax(RiscvFloatMinMax(format))
-  minmax.left <== left
-  minmax.right <== right
-  minmax.maximum <== control.minmax_operation === RV5StageFloatMinMaxOperation.Maximum
+  inst minmax(MinMaxRecFN(format))
+  minmax.a <== left_recoded
+  minmax.b <== right_recoded
+  minmax.operation <== control.minmax_operation
+
+  def ZfaModule = if zfa_enabled | RV5StageZfaFormatDatapath(format, ~modulo: zfa_modulo_enabled) | RV5StageDisabledZfaFormatDatapath(format)
+  inst zfa(ZfaModule)
+  zfa.value <== left_recoded
+  zfa.rounding_mode <== request.rounding_mode
+  zfa.raise_inexact <== control.round_raise_inexact
+  zfa.immediate_index <== request.immediate_index
 
   def normalized_word = fp_integer_word_input(
     xlen,
@@ -150,9 +226,13 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
       [RV5StageFloatUnit.Multiply,
        riscv_canonicalize_nan(format, multiply.out.to_ieee())],
       [RV5StageFloatUnit.SignInject, sign_value],
-      [RV5StageFloatUnit.MinMax, minmax.out],
+      [RV5StageFloatUnit.MinMax,
+       riscv_canonicalize_nan(format, minmax.out.to_ieee())],
       [RV5StageFloatUnit.Convert, converted_fp],
-      [RV5StageFloatUnit.Move, fp_move_value]
+      [RV5StageFloatUnit.Move, fp_move_value],
+      [RV5StageFloatUnit.Immediate, zfa.immediate],
+      [RV5StageFloatUnit.RoundToIntegral,
+       riscv_canonicalize_nan(format, zfa.rounded.to_ieee())]
     ]
   )
   def integer_value = mux_lookup(
@@ -161,6 +241,8 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
     [
       [RV5StageFloatUnit.Compare, comparison_value.as_bits().zext(width)],
       [RV5StageFloatUnit.Convert, converted_integer],
+      [RV5StageFloatUnit.IntegerModulo,
+       fp_integer_word_result(xlen, zfa.modulo)],
       [RV5StageFloatUnit.Move, integer_move_value],
       [RV5StageFloatUnit.Classify, class_value]
     ]
@@ -174,13 +256,16 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
       [RV5StageFloatUnit.Add, riscv_exception_flags(add.exception_flags)],
       [RV5StageFloatUnit.Multiply,
        riscv_exception_flags(multiply.exception_flags)],
-      [RV5StageFloatUnit.MinMax, minmax.exception_flags],
+      [RV5StageFloatUnit.MinMax,
+       riscv_exception_flags(minmax.exception_flags)],
       [RV5StageFloatUnit.Compare,
        riscv_exception_flags(compare.exception_flags)],
       [RV5StageFloatUnit.Convert,
        mux(fp_destination,
            riscv_exception_flags(integer_to_fp.exception_flags),
-           conversion_flags)]
+           conversion_flags)],
+      [RV5StageFloatUnit.RoundToIntegral, zfa.round_exception_flags],
+      [RV5StageFloatUnit.IntegerModulo, zfa.modulo_exception_flags]
     ]
   )
   def exception_flags_valid = control.unit.is_one_of(
@@ -189,7 +274,9 @@ circuit RV5StageFpFormatDatapath(xlen :: XLen, profile :: FloatingPointProfile, 
     RV5StageFloatUnit.Multiply,
     RV5StageFloatUnit.MinMax,
     RV5StageFloatUnit.Compare,
-    RV5StageFloatUnit.Convert
+    RV5StageFloatUnit.Convert,
+    RV5StageFloatUnit.RoundToIntegral,
+    RV5StageFloatUnit.IntegerModulo
   )
 
   completion <== RV5StageFpCompletion(xlen, profile, Context):
@@ -219,7 +306,9 @@ circuit RV5StageFpHalfMinimalDatapath(xlen :: XLen, profile :: FloatingPointProf
     exception_flags: bits(0, 5)
     exception_flags_valid: Bool(#false)
 
-circuit RV5StageFpFixedF(xlen :: XLen, Context :: DataType):
+circuit RV5StageFpFixedF(xlen :: XLen,
+                         Context :: DataType,
+                         ~zfa: zfa_enabled :: Boolean = #false):
   input request: RV5StageFpExecutionRequest(xlen, FloatingPointProfile.F, Context)
   output completion: RV5StageFpCompletion(xlen, FloatingPointProfile.F, Context)
 
@@ -227,12 +316,15 @@ circuit RV5StageFpFixedF(xlen :: XLen, Context :: DataType):
     xlen,
     FloatingPointProfile.F,
     FloatFormat.F32,
-    Context
+    Context,
+    ~zfa: zfa_enabled
   ))
   single.request <== request
   completion <== single.completion
 
-circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
+circuit RV5StageFpFixedD(xlen :: XLen,
+                         Context :: DataType,
+                         ~zfa: zfa_enabled :: Boolean = #false):
   input request: RV5StageFpExecutionRequest(xlen, FloatingPointProfile.D, Context)
   output completion: RV5StageFpCompletion(xlen, FloatingPointProfile.D, Context)
 
@@ -240,13 +332,16 @@ circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
     xlen,
     FloatingPointProfile.D,
     FloatFormat.F32,
-    Context
+    Context,
+    ~zfa: zfa_enabled
   ))
   inst double(RV5StageFpFormatDatapath(
     xlen,
     FloatingPointProfile.D,
     FloatFormat.F64,
-    Context
+    Context,
+    ~zfa: zfa_enabled,
+    ~zfa_modulo: #true
   ))
   single.request <== request
   double.request <== request
@@ -305,14 +400,15 @@ circuit RV5StageFpFixedD(xlen :: XLen, Context :: DataType):
 
 circuit RV5StageFpFixedFHalf(xlen :: XLen,
                              Context :: DataType,
-                             ~arithmetic: arithmetic_enabled :: Boolean):
+                             ~arithmetic: arithmetic_enabled :: Boolean,
+                             ~zfa: zfa_enabled :: Boolean = #false):
   def profile = FloatingPointProfile.F
   input request: RV5StageFpExecutionRequest(xlen, profile, Context)
   output completion: RV5StageFpCompletion(xlen, profile, Context)
 
-  def HalfModule = if arithmetic_enabled | RV5StageFpFormatDatapath(xlen, profile, FloatFormat.F16, Context) | RV5StageFpHalfMinimalDatapath(xlen, profile, Context)
+  def HalfModule = if arithmetic_enabled | RV5StageFpFormatDatapath(xlen, profile, FloatFormat.F16, Context, ~zfa: zfa_enabled) | RV5StageFpHalfMinimalDatapath(xlen, profile, Context)
   inst half(HalfModule)
-  inst single(RV5StageFpFixedF(xlen, Context))
+  inst single(RV5StageFpFixedF(xlen, Context, ~zfa: zfa_enabled))
   half.request <== request
   single.request <== request
 
@@ -356,14 +452,15 @@ circuit RV5StageFpFixedFHalf(xlen :: XLen,
 
 circuit RV5StageFpFixedDHalf(xlen :: XLen,
                              Context :: DataType,
-                             ~arithmetic: arithmetic_enabled :: Boolean):
+                             ~arithmetic: arithmetic_enabled :: Boolean,
+                             ~zfa: zfa_enabled :: Boolean = #false):
   def profile = FloatingPointProfile.D
   input request: RV5StageFpExecutionRequest(xlen, profile, Context)
   output completion: RV5StageFpCompletion(xlen, profile, Context)
 
-  def HalfModule = if arithmetic_enabled | RV5StageFpFormatDatapath(xlen, profile, FloatFormat.F16, Context) | RV5StageFpHalfMinimalDatapath(xlen, profile, Context)
+  def HalfModule = if arithmetic_enabled | RV5StageFpFormatDatapath(xlen, profile, FloatFormat.F16, Context, ~zfa: zfa_enabled) | RV5StageFpHalfMinimalDatapath(xlen, profile, Context)
   inst half(HalfModule)
-  inst base(RV5StageFpFixedD(xlen, Context))
+  inst base(RV5StageFpFixedD(xlen, Context, ~zfa: zfa_enabled))
   half.request <== request
   base.request <== request
 
@@ -430,6 +527,10 @@ circuit RV5StageFpFixedDHalf(xlen :: XLen,
     exception_flags_valid: ordinary.exception_flags_valid
 
 export:
+  RV5StageDisabledZfaFormatDatapath
+  RV5StageDisabledZfaModulo
+  RV5StageZfaModulo
+  RV5StageZfaFormatDatapath
   RV5StageFpFormatDatapath
   RV5StageFpHalfMinimalDatapath
   RV5StageFpFixedF

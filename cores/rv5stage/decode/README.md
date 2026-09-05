@@ -12,9 +12,9 @@ composition and control-column boundaries.
 
 ## Select a decode specialization
 
-`RV5StageInstructionDecoder` accepts `xlen`, `profile`, and `half_precision` as
-host parameters. They select the instruction catalogs before hardware is
-generated:
+`RV5StageInstructionDecoder` accepts `xlen`, `profile`, `half_precision`, and
+the default-disabled `zfa` switch as host parameters. They select the
+instruction catalogs before hardware is generated:
 
 | Specialization | Selected rows |
 |---|---|
@@ -27,7 +27,9 @@ RV5Stage deliberately accepts only disabled FP, RV32F, or RV64D. A half-precisio
 profile requires FP to be enabled. `Zfhmin` adds its load, store, move, and
 conversion catalog, plus the D-to-H and H-to-D conversions for RV64D. `Zfh`
 adds the XLEN-selected full Zfh catalog and those D conversions when the base
-profile is RV64D. These lists are assembled by
+profile is RV64D. Zfa adds the selected S and D format operations, plus H
+operations only for full Zfh; RV32D pair moves remain cataloged but unsupported
+because RV5Stage does not implement RV32D. These lists are assembled by
 `rv5stage_floating_point_instructions`; the matching execution cases are
 assembled separately and then checked against the same selected instruction
 domain.
@@ -40,9 +42,9 @@ With FP disabled, the prebuilt RV32 or RV64 core relation is selected instead.
 
 ```mermaid
 flowchart LR
-    PARAMS["xlen + FP profile + half profile"]
+    PARAMS["xlen + FP profile + half profile + Zfa"]
     CORECAT["Selected core catalog<br/>I + M + A + B + Zicond + system"]
-    FPCAT["Selected FP catalog<br/>F / F+D / optional Zfhmin or Zfh"]
+    FPCAT["Selected FP catalog<br/>F / F+D / optional Zfhmin, Zfh, or Zfa"]
     COLUMNS["Component relations<br/>ALU, operands, branch, memory,<br/>multiply, divide, writeback, system, fence"]
     COREROWS["compose_control_cases<br/>core RV5StageControl rows"]
     FPEXEC["FP execution relations"]

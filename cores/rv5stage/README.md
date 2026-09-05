@@ -21,7 +21,7 @@ caches live here. Reusable execution components remain directly under
 | Pipeline boundaries | Producer-owned fetch queue, elastic IF/ID and ID/EX, then feed-forward EX/MEM and MEM/WB |
 | Deferred work | Loads, atomics, multiply, divide, and FP results may complete after their scalar token retires |
 | Integer widths | RV32 and RV64 selected by `XLen.X32` or `XLen.X64` |
-| Floating point | Disabled by default; RV32F or RV64D, with optional Zfhmin or Zfh |
+| Floating point | Disabled by default; RV32F or RV64D, with optional Zfhmin, Zfh, or Zfa |
 | Address translation | Bare for RV32; Bare or Sv39 for RV64 |
 | Private caches | Separate configurable L1I and blocking write-back L1D; fixed 64-byte lines |
 | External memory | Separate instruction and data CHI RN-F channels plus a device RN-I channel |
@@ -29,7 +29,7 @@ caches live here. Reusable execution components remain directly under
 The integer decode includes RV32I/RV64I, A, B, M, Zicond, Zicsr, Zifencei, and
 the supported privileged instructions. Optional C expansion follows the
 selected XLEN and FP profile; RV32F or RV64F and RV64D rows, plus optional
-Zfhmin/Zfh rows, are added only by their matching FP specialization. Zicntr
+Zfhmin, Zfh, and Zfa rows, are added only by their matching FP specialization. Zicntr
 views come from the CSR block rather than instruction rows. The
 [`decode guide`](decode/README.md#select-a-decode-specialization) owns the exact
 specialization matrix and catalog composition. RV32D and an RV64F-only core are
@@ -182,7 +182,7 @@ outstanding. D-cache responses are ordered, and a blocking miss prevents younger
 memory requests from entering the cache even when non-memory work can pass it.
 
 The structured decoder selects the integer-only, RV32F, or RV64D base catalog
-and optionally composes Zfhmin or Zfh at host elaboration. It emits component
+and optionally composes Zfhmin, Zfh, or Zfa at host elaboration. It emits component
 control bundles through one hardware decode relation, without an
 instruction-kind enum or parallel runtime decoders. Unused controls remain
 synthesis don't-cares behind a separate valid bit.
@@ -260,6 +260,7 @@ specialized core definition to be stamped at multiple placements.
 | `xlen` | Required `XLen.X32` or `XLen.X64` architectural width |
 | `~floating_point` | `None`, RV32F, or RV64D-compatible FP profile |
 | `~half_precision` | `None`, `Zfhmin`, or `Zfh`; requires an enabled F/D profile |
+| `~zfa` | Enables Zfa for the selected F/D formats and full-Zfh half precision; defaults to false |
 | `~compressed` | Enables C-extension fetch, expansion, two-byte sequencing, and matching CSR alignment behavior |
 | `~icache` | L1I set and way geometry; defaults to `RV5StageCacheConfig(64, 1)` |
 | `~dcache` | L1D set and way geometry; defaults independently to `RV5StageCacheConfig(64, 1)` |

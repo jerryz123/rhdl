@@ -1,4 +1,4 @@
-// Verifies the standalone FP pipeline's LSU bridge, hazards, backpressure, and F/D/Zfh execution paths.
+// Verifies the standalone FP pipeline's LSU bridge, hazards, backpressure, and F/D/Zfh/Zfa execution paths.
 module rv5stage_fp_pipeline_tb;
   typedef struct packed {
     logic valid;
@@ -363,6 +363,139 @@ module rv5stage_fp_pipeline_tb;
     store_response_in.ready = 1'b0;
     #1;
     assert (drained);
+
+    // Zfa FLI uses the encoded rs1 field as a constant selector without a
+    // register dependency. Selector 18 is 1.5 in every supported format.
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'hfa;
+    issue_in.bits.control.registers.destination = 2'd2;
+    issue_in.bits.control.execution.unit = 4'd11;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
+    issue_in.bits.frs1 = 5'd18;
+    issue_in.bits.frd = 5'd16;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.fp_value == 64'h3ff8000000000000);
+    assert (!completion_out.bits.exception_flags_valid);
+    consume_completion();
+
+    // FROUND suppresses inexact while FROUNDNX reports it for the same result.
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'hf0;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd2;
+    issue_in.bits.control.execution.unit = 4'd12;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
+    issue_in.bits.control.execution.uses_rounding_mode = 1'b1;
+    issue_in.bits.control.execution.round_raise_inexact = 1'b0;
+    issue_in.bits.frs1 = 5'd16;
+    issue_in.bits.frd = 5'd17;
+    issue_in.bits.rounding_mode = 3'd0;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.fp_value == 64'h4000000000000000);
+    assert (completion_out.bits.exception_flags == 5'b0);
+    assert (completion_out.bits.exception_flags_valid);
+    consume_completion();
+
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'hf1;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd2;
+    issue_in.bits.control.execution.unit = 4'd12;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
+    issue_in.bits.control.execution.uses_rounding_mode = 1'b1;
+    issue_in.bits.control.execution.round_raise_inexact = 1'b1;
+    issue_in.bits.frs1 = 5'd16;
+    issue_in.bits.frd = 5'd17;
+    issue_in.bits.rounding_mode = 3'd0;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.fp_value == 64'h4000000000000000);
+    assert (completion_out.bits.exception_flags == 5'b00001);
+    consume_completion();
+
+    // Zfa minimum propagates a quiet NaN and quiet comparisons do not raise
+    // invalid for that operand.
+    load_register(5'd18, 64'h7ff8000000000001, 2'd2);
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'hf2;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.uses_frs2 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd2;
+    issue_in.bits.control.execution.unit = 4'd6;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.destination_precision = 2'd2;
+    issue_in.bits.control.execution.minmax_operation = 2'd0;
+    issue_in.bits.frs1 = 5'd18;
+    issue_in.bits.frs2 = 5'd1;
+    issue_in.bits.frd = 5'd19;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.fp_value == 64'h7ff8000000000000);
+    assert (completion_out.bits.exception_flags == 5'b0);
+    consume_completion();
+
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'hf3;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.uses_frs2 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd1;
+    issue_in.bits.control.execution.unit = 4'd7;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.comparison = 2'd1;
+    issue_in.bits.control.execution.comparison_signaling = 1'b0;
+    issue_in.bits.frs1 = 5'd18;
+    issue_in.bits.frs2 = 5'd1;
+    issue_in.bits.frd = 5'd20;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.integer_value == 64'b0);
+    assert (completion_out.bits.exception_flags == 5'b0);
+    consume_completion();
+
+    // FCVTMOD.W.D returns the low 32 bits while retaining FCVT.W.D flags.
+    load_register(5'd21, 64'h41f0000000100000, 2'd2);
+    issue_in.valid = 1'b1;
+    issue_in.bits = '0;
+    issue_in.bits.context_0 = 8'hf4;
+    issue_in.bits.control.registers.uses_frs1 = 1'b1;
+    issue_in.bits.control.registers.destination = 2'd1;
+    issue_in.bits.control.execution.unit = 4'd13;
+    issue_in.bits.control.execution.source_precision = 2'd2;
+    issue_in.bits.control.execution.integer_width = 1'b0;
+    issue_in.bits.frs1 = 5'd21;
+    issue_in.bits.frd = 5'd22;
+    do @(posedge clock); while (!issue_out.ready);
+    @(negedge clock);
+    issue_in.valid = 1'b0;
+    wait (completion_out.valid);
+    #1;
+    assert (completion_out.bits.integer_value == 64'h1);
+    assert (completion_out.bits.exception_flags == 5'b10000);
+    consume_completion();
 
     $display("RV5Stage FP pipeline passed");
     $finish;
