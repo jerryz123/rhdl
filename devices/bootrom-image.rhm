@@ -1,0 +1,97 @@
+#lang rhombus
+// Builds validated immutable BootROM images and the default multihart RISC-V reset program.
+
+import:
+  rhombus.bits.(<<) as <<
+  rhombus.bits.(>>) as >>
+  lib("riscv/model/main.rhm") open
+  lib("riscv/isa/integer-common.rhm") open
+  lib("riscv/isa/privileged.rhm").WFI
+  lib("riscv/isa/zicsr.rhm").CSRRS
+
+def RiscvBootROMResetAddress = 0x00010000
+def RiscvBootROMPayloadAddress = 0x80000000
+def RiscvMhHartIdCSR = 0xf14
+
+class BootROMImage(bytes :: NonemptyList.of(Nat)):
+  constructor (bytes :: NonemptyList.of(Nat)):
+    for (byte in bytes):
+      unless byte < 0x100
+      | error(~who: #'BootROMImage, "image elements must be bytes")
+    super(bytes)
+
+  property size_bytes :: PosInt:
+    bytes.length()
+
+  method padded_bytes(window_bytes :: PosInt):
+    unless size_bytes <= window_bytes
+    | error(~who: #'padded_bytes, "image must fit in the BootROM window")
+    bytes ++ for List (_index in size_bytes..window_bytes): 0
+
+fun instruction_words_to_bytes(words :: NonemptyList.of(Nat)):
+  def mutable bytes = []
+  for (word in words):
+    for (byte_index in 0..4):
+      bytes := bytes ++ [bits.field(word, byte_index * 8, (byte_index + 1) * 8)]
+  bytes
+
+// The generated reset program is equivalent to this simple assembly:
+//
+//   csrr  a0, mhartid
+//   bnez  a0, park
+//   li    a1, 0
+//   auipc t0, payload_upper
+//   jalr  zero, payload_lower(t0)
+// park:
+//   wfi
+//   j     park
+fun riscv_bootrom_image(reset_address :: Nat = RiscvBootROMResetAddress,
+                        payload_address :: Nat = RiscvBootROMPayloadAddress):
+  unless reset_address mod 4 == 0
+  | error(~who: #'riscv_bootrom_image, "reset address must be four-byte aligned")
+  unless payload_address mod 4 == 0
+  | error(~who: #'riscv_bootrom_image, "payload address must be four-byte aligned")
+
+  // a0 receives mhartid. Nonzero harts branch over the primary-hart
+  // trampoline and remain in the WFI loop at the end of the image.
+  def mutable words = [
+    CSRRS.encode([
+      rd.constrain(10),
+      rs1.constrain(0),
+      immediate12.constrain(RiscvMhHartIdCSR)
+    ]),
+    BNE.encode([
+      rs1.constrain(10),
+      rs2.constrain(0)
+    ], ~immediate: 16),
+    ADDI.encode([
+      rd.constrain(11),
+      rs1.constrain(0)
+    ], ~immediate: 0)
+  ]
+
+  def auipc_address = reset_address + (words.length() * 4)
+  def delta = payload_address - auipc_address
+  def upper = (delta + 0x800) >> 12
+  unless upper >= -(1 << 19) && upper < (1 << 19)
+  | error(~who: #'riscv_bootrom_image,
+          "payload is outside the AUIPC/JALR PC-relative range")
+  def lower = delta - (upper << 12)
+  words := words ++ [AUIPC.encode([rd.constrain(5)], ~immediate: upper << 12),
+                     JALR.encode([
+                       rd.constrain(0),
+                       rs1.constrain(5)
+                     ], ~immediate: lower)]
+
+  words := words ++ [WFI.encode([]), JAL.encode([rd.constrain(0)], ~immediate: -4)]
+  BootROMImage(instruction_words_to_bytes(words))
+
+def DefaultRiscvBootROMImage = riscv_bootrom_image()
+
+export:
+  RiscvBootROMResetAddress
+  RiscvBootROMPayloadAddress
+  RiscvMhHartIdCSR
+  BootROMImage
+  riscv_bootrom_image
+  DefaultRiscvBootROMImage

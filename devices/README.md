@@ -5,6 +5,25 @@
 This package contains reusable hardware devices that are independent of any
 processor core or SoC address map, plus device-specific simulation models.
 
+[`bootrom.rhdl`](bootrom.rhdl) implements an immutable, one-outstanding CHI
+SN-I BootROM. It accepts `ReadNoSnp` transfers from one byte through 64 bytes,
+including native multi-beat cache-line responses, and pads unused bytes in its
+power-of-two service window with zero. `CHIBootROMConfig` owns the image and
+window specialization; `CHIBootROMParams` and `CHIBootROMIdentity` separate
+static service metadata from occurrence-specific NodeID and base-address wires.
+
+[`bootrom-image.rhm`](bootrom-image.rhm) supplies arbitrary validated byte
+images and an XLEN-independent RISC-V reset-program generator. Its default
+program reads the Zicsr `mhartid` CSR into `a0`, sends hart zero to the
+configured payload with an `AUIPC`/`JALR` trampoline, and parks nonzero harts
+in a `WFI` loop. `a1` is zero until a platform-specific image elects to pass a
+device-tree address. Platforms requiring a secondary-hart release protocol can
+supply a different `BootROMImage`; that release mechanism and its interrupt
+policy remain the containing platform's responsibility.
+
+No SoC currently instantiates `CHIBootROM`; its address-map, Home Node, reset
+vector, and instruction-fetch integration remain separate platform work.
+
 - [`aclint.rhdl`](aclint.rhdl) implements ACLINT MTIMER and MSWI for a
   parameterized number of harts. Its register layout uses offsets within a
   64-KiB CLINT-compatible service window; a containing SoC chooses the global
@@ -61,7 +80,7 @@ No SoC harness instantiates `UartDPI` yet. A future harness can connect
 `model.uart_tx` from the device's `tx` and the device's `rx` from
 `model.uart_rx`.
 
-Run the package host test with `make device-test`. The `aclint` and `uart16550`
-CIRCT fixtures also simulate register, interrupt, and external-pin behavior
-through Verilator. Run the standalone DPI serial model with
+Run the package host test with `make device-test`. The `bootrom`, `aclint`, and
+`uart16550` CIRCT fixtures also simulate protocol, register, interrupt, and
+external-pin behavior through Verilator. Run the standalone DPI serial model with
 `FIXTURE=uart-dpi bash tests/backend/run-circt.sh --simulate-only`.

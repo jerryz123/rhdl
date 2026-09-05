@@ -62,17 +62,29 @@ hardware.
 
 An `InstructionSpec` binds one 32-bit encoding to its operand and immediate
 format. Its fixed requirements and variable fields must be disjoint and must
-cover all 32 instruction bits. An `InstructionCatalog` requires unique names
-and pairwise-disjoint encodings. Architecture-facing `encoding_fields` remain
-instruction bits, not generated controls; microarchitectural operations and
-pipeline classes belong in a core-owned typed decode relation.
+cover all 32 instruction bits. `InstructionSpec.encode` assembles a word from
+one constraint for every operand and auxiliary field plus the format-owned
+semantic immediate, rejecting missing, duplicate, foreign, misaligned, or
+out-of-range values:
+
+```rhombus
+ADDI.encode([rd.constrain(11), rs1.constrain(0)], ~immediate: 0)
+```
+
+An `InstructionCatalog` requires unique names and pairwise-disjoint encodings.
+Architecture-facing `encoding_fields` remain instruction bits, not generated
+controls; microarchitectural operations and pipeline classes belong in a
+core-owned typed decode relation.
 
 `ImmediateLayout` records each source fragment, destination position, signedness,
-and implicit zero bit. In particular, five-bit RV32 shift amounts and six-bit
-RV64 shift amounts remain distinct. `InstructionExpansion` requires exactly one
-binding for every target operand and a correctly sized source or constant for
-every target immediate. The same validated expansion can run as pure host code
-or be materialized by the Rhodium adapter.
+and implicit zero bit. `ImmediateLayout.encode` validates a semantic signed or
+unsigned value before scattering it into instruction fields, while
+`ImmediateLayout.scatter` accepts an already width-masked value for lower-level
+uses such as compressed expansion. In particular, five-bit RV32 shift amounts
+and six-bit RV64 shift amounts remain distinct. `InstructionExpansion` requires
+exactly one binding for every target operand and a correctly sized source or
+constant for every target immediate. The same validated expansion can run as
+pure host code or be materialized by the Rhodium adapter.
 
 ## ISA catalog map
 

@@ -134,6 +134,30 @@ class ImmediateLayout(name :: NonemptyString,
       result := result + (piece.source.extract(word) << piece.output_low)
     result
 
+  // Scatters an already width-masked immediate into its instruction fields.
+  // This lower-level form is also used when expanding compressed encodings.
+  method scatter(value :: Nat):
+    unless value <= width_mask(width)
+    | error(~who: #'scatter, "immediate value does not fit its layout")
+    def mutable result = 0
+    for (piece in pieces):
+      def fragment = bits.field(value, piece.output_low, piece.output_high + 1)
+      result := result bits.or (fragment << piece.source.low)
+    for (bit in zero_bits):
+      when bits.field(value, bit, bit + 1) != 0
+      | error(~who: #'scatter, "immediate value sets an implicit-zero bit")
+    result
+
+  // Validates a semantic signed or unsigned immediate before scattering it.
+  method encode(value :: Int):
+    def limit = 1 << (width - 1)
+    if signed
+    | unless value >= -limit && value < limit
+      | error(~who: #'encode, "signed immediate is out of range")
+    | unless value >= 0 && value <= width_mask(width)
+      | error(~who: #'encode, "unsigned immediate is out of range")
+    scatter(value bits.and width_mask(width))
+
 fun fields_mask(fields :: List.of(BitField), who :: Symbol):
   def mutable mask = 0
   for (field in fields):

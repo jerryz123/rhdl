@@ -4,6 +4,9 @@
 import:
   rhombus.bits.(<<) as <<
   "../model/main.rhm" open
+  "../isa/integer-common.rhm" open
+  "../isa/privileged.rhm" open
+  "../isa/zicsr.rhm" open
 
 def add_encoding = instruction_encoding(
   opcode.constrain(0x33),
@@ -39,3 +42,32 @@ check:
   instruction_encoding(outside.constrain(0)) ~throws "outside"
   add_encoding.matches(1 << 32) ~throws "fit the encoding width"
   add_encoding.overlaps(InstructionEncoding([opcode.constrain(0x33)], 16)) ~throws "equal width"
+
+check:
+  CSRRS.encode([
+    rd.constrain(10),
+    rs1.constrain(0),
+    immediate12.constrain(0xf14)
+  ]) ~is 0xf1402573
+  BNE.encode([rs1.constrain(10), rs2.constrain(0)], ~immediate: 16) ~is 0x00051863
+  ADDI.encode([rd.constrain(11), rs1.constrain(0)], ~immediate: 0) ~is 0x00000593
+  AUIPC.encode([rd.constrain(5)], ~immediate: 0x7fff0000) ~is 0x7fff0297
+  JALR.encode([rd.constrain(0), rs1.constrain(5)], ~immediate: -12) ~is 0xff428067
+  WFI.encode([]) ~is 0x10500073
+  JAL.encode([rd.constrain(0)], ~immediate: -4) ~is 0xffdff06f
+
+  ADDI.encode([rd.constrain(1)], ~immediate: 0) ~throws "rs1 must be supplied exactly once"
+  ADDI.encode([
+    rd.constrain(1),
+    rd.constrain(2),
+    rs1.constrain(0)
+  ], ~immediate: 0) ~throws "rd must be supplied exactly once"
+  ADDI.encode([
+    rd.constrain(1),
+    rs1.constrain(0),
+    rs2.constrain(0)
+  ], ~immediate: 0) ~throws "not an explicit field"
+  ADDI.encode([rd.constrain(1), rs1.constrain(0)]) ~throws "requires an immediate"
+  WFI.encode([], ~immediate: 0) ~throws "does not have an immediate"
+  ADDI.encode([rd.constrain(1), rs1.constrain(0)], ~immediate: 2048) ~throws "out of range"
+  BNE.encode([rs1.constrain(1), rs2.constrain(0)], ~immediate: 3) ~throws "implicit-zero"

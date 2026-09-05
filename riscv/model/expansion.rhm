@@ -17,7 +17,6 @@ export:
   NonzeroFieldConstraint
   NonzeroImmediateConstraint
   resize_immediate_value
-  scatter_immediate_value
 
 interface ExpansionValueSource:
   method decode(word :: Nat) :: Nat
@@ -55,21 +54,6 @@ fun resize_immediate_value(value :: Nat,
   if signed && bits.field(masked, source_width - 1, source_width) == 1
   | masked bits.or (width_mask(target_width) bits.xor width_mask(source_width))
   | masked
-
-fun scatter_immediate_value(layout :: ImmediateLayout,
-                            value :: Nat):
-  unless value <= width_mask(layout.width)
-  | error(~who: #'scatter_immediate_value,
-          "immediate value does not fit its target layout")
-  def mutable result = 0
-  for (piece in layout.pieces):
-    def fragment = bits.field(value, piece.output_low, piece.output_high + 1)
-    result := result bits.or (fragment bits.(<<) piece.source.low)
-  for (bit in layout.zero_bits):
-    when bits.field(value, bit, bit + 1) != 0
-    | error(~who: #'scatter_immediate_value,
-            "immediate value sets an implicit-zero target bit")
-  result
 
 class InstructionExpansion(target :: InstructionSpec,
                            bindings :: List.of(InstructionFieldBinding),
@@ -115,9 +99,9 @@ class InstructionExpansion(target :: InstructionSpec,
           immediate.signed,
           target_immediate.width
         )
-        instruction bits.or scatter_immediate_value(target_immediate, resized)
+        instruction bits.or target_immediate.scatter(resized)
     | if immediate is_a Nat
-      | scatter_immediate_value(target.immediate, immediate) bits.or instruction
+      | target.immediate.scatter(immediate) bits.or instruction
       | instruction
 
 interface ExpansionConstraint:
