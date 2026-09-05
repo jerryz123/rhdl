@@ -1,5 +1,5 @@
 #lang rhodium
-// Assembles variable-length instructions from a two-word aligned fetch window.
+// Assembles and queues variable-length instructions from an aligned fetch window.
 
 import:
   "bundles.rhdl" open
@@ -9,6 +9,7 @@ import:
   "../../riscv/rtl/compressed.rhdl" open
   lib("rhodium/std/bits.rhdl") open
   lib("rhodium/std/ready-valid.rhdl") open
+  lib("rhodium/std/flow/queue.rhdl") open
 
 hardware_enum RV5StageFetchWordState:
   Empty
@@ -45,6 +46,7 @@ sync_circuit RV5StageInstructionFetch(xlen :: XLen,
   reg slot1(~init: empty_word)
 
   def command = flush ||| restart_valid
+  inst instructions(Queue(FetchDecode(xlen), 5, ~flow: #true), ~reset_when: command)
   def slot0_valid = slot0.state === RV5StageFetchWordState.Valid
   def slot1_valid = slot1.state === RV5StageFetchWordState.Valid
   def slot0_requested = slot0.state === RV5StageFetchWordState.Requested
@@ -80,8 +82,8 @@ sync_circuit RV5StageInstructionFetch(xlen :: XLen,
   def sequential_pc = pc + instruction_bytes
   def instruction_fault_address = mux(needs_following_word & (slot1.page_fault ||| slot1.access_fault), slot1.base, pc)
 
-  fetched.valid <== active & !command & output_available
-  fetched.bits <== FetchDecode(xlen):
+  instructions.ingress.valid <== active & !command & output_available
+  instructions.ingress.bits <== FetchDecode(xlen):
     pc: pc
     instruction: expanded_instruction
     raw_instruction: raw_instruction
@@ -90,10 +92,13 @@ sync_circuit RV5StageInstructionFetch(xlen :: XLen,
     instruction_page_fault: instruction_page_fault
     instruction_access_fault: instruction_access_fault
     instruction_fault_address: instruction_fault_address
+  fetched.valid <== active & !command & instructions.egress.valid
+  fetched.bits <== instructions.egress.bits
+  instructions.egress.ready <== active & !command & fetched.ready
 
-  def fetched_fire = fetched.fire()
+  def instruction_enqueue = instructions.ingress.fire()
   def retain_lower_word = instruction_is_compressed & !upper_half
-  def pop_word = fetched_fire & !retain_lower_word
+  def pop_word = instruction_enqueue & !retain_lower_word
   memory.response.ready <== !command & (slot0_requested ||| slot1_requested)
   def response_fire = memory.response.fire()
   def response_to_slot0 = response_fire & slot0_requested
@@ -112,7 +117,7 @@ sync_circuit RV5StageInstructionFetch(xlen :: XLen,
   def shifted_slot0_word = mux(pop_word, received_slot1_word, received_slot0_word)
   def shifted_slot0_page_fault = mux(pop_word, received_slot1_page_fault, received_slot0_page_fault)
   def shifted_slot0_access_fault = mux(pop_word, received_slot1_access_fault, received_slot0_access_fault)
-  def request_pc = mux(fetched_fire, sequential_pc, pc)
+  def request_pc = mux(instruction_enqueue, sequential_pc, pc)
   def request_address = mux(shifted_slot0_state === RV5StageFetchWordState.Empty,
                             align_down(request_pc, 4),
                             shifted_slot0_base + bits(4, width))
@@ -136,7 +141,7 @@ sync_circuit RV5StageInstructionFetch(xlen :: XLen,
     slot0 <== empty_word
     slot1 <== empty_word
   otherwise:
-    when fetched_fire:
+    when instruction_enqueue:
       pc <== sequential_pc
     when (response_fire ||| pop_word ||| request_fire):
       slot0 <== RV5StageFetchWord(xlen):

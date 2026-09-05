@@ -1,4 +1,4 @@
-// Checks compressed reuse, cross-word assembly, restart, and second-word faults.
+// Checks fetch assembly, queued run-ahead under backpressure, restart, and faults.
 module rv5stage_fetch_tb;
   typedef struct packed { logic [63:0] address; } request_bits_t;
   typedef struct packed { logic valid; request_bits_t bits; } request_t;
@@ -32,6 +32,8 @@ module rv5stage_fetch_tb;
   fetched_out_t fetched_out;
   logic response_valid;
   response_bits_t response_bits;
+  logic fetched_ready = 1'b1;
+  integer stalled_requests;
 
   RV5StageInstructionFetch dut (.*);
   always #5 clock = ~clock;
@@ -53,7 +55,7 @@ module rv5stage_fetch_tb;
     memory_in.request.ready = 1'b1;
     memory_in.response.valid = response_valid;
     memory_in.response.bits = response_bits;
-    fetched_in.ready = 1'b1;
+    fetched_in.ready = fetched_ready;
   end
 
   always_ff @(posedge clock) begin
@@ -127,6 +129,38 @@ module rv5stage_fetch_tb;
     assert (fetched_out.valid && fetched_out.bits.pc == 64'h108 &&
             fetched_out.bits.instruction == 32'h00200113)
       else $fatal(1, "fetch window inserted a bubble after pc 0x104");
+
+    fetched_ready = 1'b0;
+    stalled_requests = 0;
+    restart_pc = 64'h200;
+    restart_valid = 1'b1;
+    @(posedge clock);
+    #1 restart_valid = 1'b0;
+    repeat (24) begin
+      @(posedge clock);
+      #1;
+      if (memory_out.request.valid && memory_in.request.ready)
+        stalled_requests = stalled_requests + 1;
+      if (fetched_out.valid)
+        assert (fetched_out.bits.pc == 64'h200 &&
+                fetched_out.bits.instruction == 32'h00000013)
+          else $fatal(1, "fetch queue head changed under backpressure pc=%h",
+                      fetched_out.bits.pc);
+    end
+    assert (stalled_requests >= 5)
+      else $fatal(1, "fetch did not run ahead while Decode was stalled requests=%0d",
+                  stalled_requests);
+    assert (fetched_out.valid && fetched_out.bits.pc == 64'h200)
+      else $fatal(1, "fetch queue did not retain its stalled head");
+    assert (!memory_out.request.valid)
+      else $fatal(1, "fetch did not stop after exhausting bounded queue capacity");
+
+    fetched_ready = 1'b1;
+    expect_instruction(64'h200, 64'h204, 32'h00000013, 32'h00000013);
+    expect_instruction(64'h204, 64'h208, 32'h00000013, 32'h00000013);
+    expect_instruction(64'h208, 64'h20c, 32'h00000013, 32'h00000013);
+    expect_instruction(64'h20c, 64'h210, 32'h00000013, 32'h00000013);
+    expect_instruction(64'h210, 64'h214, 32'h00000013, 32'h00000013);
 
     restart_pc = 64'hffe;
     restart_valid = 1'b1;

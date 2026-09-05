@@ -18,7 +18,7 @@ caches live here. Reusable execution components remain directly under
 |---|---|
 | Pipeline | Fetch, Decode, Execute, Memory, Writeback |
 | Issue and retirement | Single issue; ordered WB commit |
-| Pipeline boundaries | Elastic IF/ID and ID/EX; feed-forward EX/MEM and MEM/WB |
+| Pipeline boundaries | Producer-owned fetch queue, elastic IF/ID and ID/EX, then feed-forward EX/MEM and MEM/WB |
 | Deferred work | Loads, atomics, multiply, divide, and FP results may complete after their scalar token retires |
 | Integer widths | RV32 and RV64 selected by `XLen.X32` or `XLen.X64` |
 | Floating point | Disabled by default; RV32F or RV64D, with optional Zfhmin or Zfh |
@@ -44,6 +44,7 @@ flowchart LR
 
     subgraph scalar["Scalar pipeline — single issue, in-order commit"]
         IF["Fetch (IF)<br/>PC, correlation, redirects"]
+        FQ["Fetch queue<br/>5 entries, non-pipe"]
         IFID["IF/ID<br/>elastic Pipe"]
         ID["Decode (ID)<br/>decode and hazards"]
         IDEX["ID/EX<br/>elastic Pipe"]
@@ -53,7 +54,7 @@ flowchart LR
         MEMWB["MEM/WB<br/>feed-forward ValidPipe"]
         WB["Writeback (WB)<br/>ordered commit"]
 
-        IF --> IFID --> ID --> IDEX --> EX --> EXMEM --> MEM --> MEMWB --> WB
+        IF --> FQ --> IFID --> ID --> IDEX --> EX --> EXMEM --> MEM --> MEMWB --> WB
     end
 
     EX -->|"load / store / AMO"| LSU["DTLB + PMA<br/>L1D or uncached path"]
@@ -87,7 +88,7 @@ flowchart LR
 
 | Region | Output boundary | May hold? | Primary responsibility |
 |---|---|---:|---|
-| Fetch | IF/ID `Pipe` | Yes | PC generation, L1I request correlation, and redirect flushing |
+| Fetch | Five-entry `Queue`, then IF/ID `Pipe` | Yes | Producer-owned PC generation, L1I request correlation, and redirect flushing |
 | Decode | ID/EX `Pipe` | Yes | Structured decode, serialization, and RAW/WAW hazard checks |
 | Execute | EX/MEM `ValidPipe` | Before transfer | Live operand reads, forwarding, ALU, branch resolution, address generation, and synchronous-fault classification |
 | Memory | MEM/WB `ValidPipe` | No | Feed-forward metadata, bypass, and cache-response alignment |
@@ -135,11 +136,14 @@ register in one cycle, and a WB-aligned cache hit can set and clear a destinatio
 without an extra busy cycle.
 
 [`fetch.rhdl`](fetch.rhdl) keeps a two-entry window of ordered, aligned L1I
-words. With C enabled it can reuse either halfword, assemble a 32-bit
-instruction that straddles adjacent words, and expand legal compressed
+words and a five-entry flow-through queue of assembled instructions. Fetch
+advances when that producer-owned queue accepts an instruction, so Decode
+backpressure can drain or fill the queue but cannot combinationally control the
+next L1I request. With C enabled Fetch can reuse either halfword, assemble a
+32-bit instruction that straddles adjacent words, and expand legal compressed
 instructions before the ordinary decoder. It retains the original 16-bit word
 for illegal-instruction trap values, reports second-word faults precisely, and
-flushes retained or outstanding wrong-path words on redirects.
+flushes retained, queued, or outstanding wrong-path data on redirects.
 
 The optional [`fp-pipeline.rhdl`](fp-pipeline.rhdl) backend owns the FP register
 file, FP RAW/WAW scoreboard, operand reads, a two-cycle fixed-latency path,
